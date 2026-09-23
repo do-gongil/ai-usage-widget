@@ -78,6 +78,25 @@ def test_expire_passed():
     assert out["five_hour"] == (0.0, None) and out["weekly"] == usage["weekly"]
 
 
+def test_last_cache_roundtrip():
+    future = datetime.now(timezone.utc) + timedelta(hours=2)
+    past = datetime.now(timezone.utc) - timedelta(minutes=1)
+    last = {"claude": {"usage": {"five_hour": (42.0, past), "weekly": (27.0, future)}}}
+    with tempfile.TemporaryDirectory() as d:
+        orig = ut.LAST_PATH
+        ut.LAST_PATH = Path(d, "last.json")
+        try:
+            assert ut.load_last() == {}  # 파일 없음
+            ut.save_last(last)
+            got = ut.load_last()["claude"]["usage"]
+            assert got["five_hour"] == (0.0, None)  # 리셋 지난 값은 0%
+            assert got["weekly"][0] == 27.0 and got["weekly"][1] == future
+            ut.LAST_PATH.write_text("{broken", encoding="utf-8")
+            assert ut.load_last() == {}
+        finally:
+            ut.LAST_PATH = orig
+
+
 def test_codex_tail_read():
     rl = {"primary": {"used_percent": 77}, "secondary": {"used_percent": 5}}
     line = json.dumps({"payload": {"type": "token_count", "rate_limits": rl}})

@@ -18,6 +18,7 @@ HOME = Path.home()
 CLAUDE_CREDENTIALS = HOME / ".claude" / ".credentials.json"
 CODEX_HOME = Path(os.environ.get("CODEX_HOME") or HOME / ".codex")
 CONFIG_PATH = Path(os.environ.get("APPDATA", HOME)) / APP_NAME / "config.json"
+LAST_PATH = CONFIG_PATH.with_name("last.json")
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 TOOLTIP_MAX = 127  # Windows NOTIFYICONDATA szTip 제한
@@ -57,6 +58,30 @@ def load_config():
 def save_config(cfg):
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+def save_last(last):
+    """마지막 성공 값 저장: 재시작 직후나 429 중에도 '?' 대신 직전 값을 보여주기 위함."""
+    data = {agent: {k: [pct, reset.isoformat() if reset else None] for k, (pct, reset) in r["usage"].items()}
+            for agent, r in last.items()}
+    try:
+        LAST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        LAST_PATH.write_text(json.dumps(data), encoding="utf-8")
+    except OSError:
+        pass  # 캐시일 뿐이라 실패해도 동작에 지장 없음
+
+
+def load_last():
+    try:
+        data = json.loads(LAST_PATH.read_text(encoding="utf-8"))
+        now = datetime.now(timezone.utc)
+        return {agent: {"usage": expire_passed(
+                    {k: (_pct(w[0]), _parse_time(w[1])) for k, w in windows.items()
+                     if k in ("five_hour", "weekly")}, now)}
+                for agent, windows in data.items()
+                if agent in ("claude", "codex") and {"five_hour", "weekly"} <= set(windows)}
+    except (OSError, ValueError, TypeError, AttributeError, IndexError):
+        return {}
 
 
 # ---------- 파싱 (순수 함수, 테스트 대상) ----------
@@ -334,7 +359,7 @@ class App:
         import pystray
         self.pystray = pystray
         self.cfg = load_config()
-        self.last = {}  # agent → 마지막 성공 결과
+        self.last = load_last()  # agent → 마지막 성공 결과 (디스크 캐시에서 복원)
         self.claude_prev = None  # 대기 중에 재사용할 직전 Claude 결과
         self.claude_until = 0.0  # time.monotonic() 기준, 이 시각 전엔 Claude 조회 안 함
         self.claude_backoff = 0
@@ -403,6 +428,8 @@ class App:
                 lines.append(format_line(name, results[agent], self.last.get(agent)))
                 if "usage" in results[agent]:
                     self.last[agent] = results[agent]
+        if any("usage" in r for r in results.values()):
+            save_last(self.last)
         if lines:
             lines.append(f"갱신 {datetime.now():%H:%M:%S}")
 
@@ -413,6 +440,9 @@ class App:
         self.icon.title = build_tooltip(lines)
 
     def _loop(self, icon):
+        # 첫 조회 전: 저장된 직전 값을 회색으로 먼저 표시
+        self.results = {a: {"error": "조회 중"} for a, on in self.cfg["agents"].items() if on}
+        self._draw_icon()
         icon.visible = True
         while not self.stopped:
             try:
