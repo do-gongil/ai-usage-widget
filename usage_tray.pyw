@@ -273,22 +273,16 @@ def icon_text(pct):
     return str(min(99, round(pct)))
 
 
-def render_icon(pct, stale=False, weekly=False):
-    """stale=True: 조회 실패로 직전 값을 보여주는 중 → 회색 배경.
-    weekly=True: 주간 값 → 숫자 아래 흰 밑줄로 5시간 값과 구분."""
+def render_icon(pct, stale=False):
+    """stale=True: 조회 실패로 직전 값을 보여주는 중 → 회색 배경."""
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     fill = COLOR_UNKNOWN if stale else color_for(pct)
     draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=10, fill=fill)
     text = icon_text(pct)
-    if weekly:
-        font = _font(42 if len(text) == 1 else 36)
-        draw.text((size / 2, 27), text, font=font, fill="white", anchor="mm")
-        draw.rectangle((8, 52, 55, 59), fill="white")
-    else:
-        font = _font(46 if len(text) == 1 else 40)
-        draw.text((size / 2, size / 2), text, font=font, fill="white", anchor="mm")
+    font = _font(46 if len(text) == 1 else 40)
+    draw.text((size / 2, size / 2), text, font=font, fill="white", anchor="mm")
     return img
 
 
@@ -376,7 +370,7 @@ class App:
 
     def _draw_icon(self):
         pct, stale = icon_state(self.results, self.last, self.cfg["view"])
-        self.icon.icon = render_icon(pct, stale, weekly=self.cfg["view"] == "weekly")
+        self.icon.icon = render_icon(pct, stale)
 
     def _quit(self):
         self.stopped = True
