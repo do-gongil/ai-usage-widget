@@ -57,8 +57,7 @@ def test_icon_state_priority():
     both = {"usage": {"five_hour": (42, None), "weekly": (71, None)}}
     assert ut.icon_state({"claude": both}, {}, "weekly") == (71, False)
     assert ut.icon_state({"claude": err}, {"claude": both}, "weekly") == (71, True)
-    assert ut.icon_usage({"claude": both}, {}) == (both["usage"], False)
-    assert ut.render_stacked_icon(42, None).size == (64, 64)
+    assert ut.render_icon(71, label=ut.VIEW_LABELS["weekly"]).size == (64, 64)
 
 
 def test_icon_text():

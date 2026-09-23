@@ -28,6 +28,8 @@ MUTEX_NAME = "Local\\UsageTray.SingleInstance"
 ERROR_ALREADY_EXISTS = 183
 
 COLOR_OK, COLOR_WARN, COLOR_CRIT, COLOR_UNKNOWN = "#2f9e5b", "#d98a12", "#d33b3b", "#7a8090"
+COLOR_BADGE = "#1d2230"
+VIEW_LABELS = {"five_hour": "5", "weekly": "W"}  # 아이콘 좌측 상단 뱃지
 
 
 # ---------- 설정 ----------
@@ -37,7 +39,6 @@ def default_config():
         "agents": {"claude": CLAUDE_CREDENTIALS.exists(), "codex": CODEX_HOME.exists()},
         "interval": 60,
         "view": "five_hour",
-        "stacked": False,
     }
 
 
@@ -49,7 +50,6 @@ def load_config():
             "agents": {"claude": bool(agents.get("claude")), "codex": bool(agents.get("codex"))},
             "interval": max(30, int(cfg.get("interval", 60))),
             "view": "weekly" if cfg.get("view") == "weekly" else "five_hour",
-            "stacked": cfg.get("stacked") is True,
         }
     except (OSError, ValueError, TypeError, AttributeError):
         cfg = default_config()
@@ -184,24 +184,18 @@ def build_tooltip(lines):
     return text if len(text) <= TOOLTIP_MAX else text[: TOOLTIP_MAX - 1] + "…"
 
 
-def icon_usage(results, last):
-    """(아이콘에 쓸 usage dict 또는 None, 오래된 값 여부). Claude 우선, 꺼져 있으면 Codex.
+def icon_state(results, last, view="five_hour"):
+    """(아이콘 숫자, 오래된 값 여부). view: 'five_hour' | 'weekly'. Claude 우선, 꺼져 있으면 Codex.
     조회 실패 시 직전 성공 값을 회색으로, 직전 값도 없으면 (None, True) → 회색 '?'."""
     for agent in ("claude", "codex"):
         if agent in results:
             r = results[agent]
             if "usage" in r:
-                return r["usage"], False
+                return r["usage"][view][0], False
             if agent in last:
-                return last[agent]["usage"], True
+                return last[agent]["usage"][view][0], True
             return None, True
     return None, True
-
-
-def icon_state(results, last, view="five_hour"):
-    """(아이콘 숫자, 오래된 값 여부). view: 'five_hour' | 'weekly'."""
-    usage, stale = icon_usage(results, last)
-    return (usage[view][0] if usage else None), stale
 
 
 # ---------- 조회 ----------
@@ -306,37 +300,22 @@ def icon_text(pct):
     return str(min(99, round(pct)))
 
 
-def render_icon(pct, stale=False):
-    """stale=True: 조회 실패로 직전 값을 보여주는 중 → 회색 배경."""
+def render_icon(pct, stale=False, label=None):
+    """stale=True: 조회 실패로 직전 값을 보여주는 중 → 회색 배경.
+    label: 좌측 상단 어두운 뱃지 글자 ('5' 5시간 / 'W' 주간). 뱃지만큼 숫자는 오른쪽 아래로."""
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     fill = COLOR_UNKNOWN if stale else color_for(pct)
-    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=10, fill=fill)
+    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=8 if label else 10, fill=fill)
     text = icon_text(pct)
-    font = _font(46 if len(text) == 1 else 40)
-    draw.text((size / 2, size / 2), text, font=font, fill="white", anchor="mm")
-    return img
-
-
-def _glyph(text, width, height):
-    """글자를 크게 그린 뒤 여백을 잘라 (width, height)로 늘린 마스크. 16px 트레이에서 숫자를 최대한 키우기 위함."""
-    mask = Image.new("L", (200, 120), 0)
-    ImageDraw.Draw(mask).text((100, 60), text, font=_font(80), fill=255, anchor="mm")
-    return mask.crop(mask.getbbox()).resize((width, height), Image.LANCZOS)
-
-
-def render_stacked_icon(p5, pw, stale=False):
-    """세로 2단: 위 5시간, 아래 주간. 여백 없이 칸을 채우고 숫자는 칸 높이에 맞게 세로로 늘림."""
-    size = 64
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    for top, pct in ((0, p5), (32, pw)):
-        fill = COLOR_UNKNOWN if stale else color_for(pct)
-        draw.rectangle((0, top, size - 1, top + 31), fill=fill)
-        text = icon_text(pct)
-        glyph = _glyph(text, 58 if len(text) == 2 else 30, 28)
-        img.paste("white", (size // 2 - glyph.width // 2, top + 2), glyph)
+    if label:
+        draw.rectangle((0, 0, 24, 26), fill=COLOR_BADGE)
+        draw.text((12, 13), label, font=_font(26), fill="white", anchor="mm")
+        draw.text((36, 43), text, font=_font(40), fill="white", anchor="mm")
+    else:
+        font = _font(46 if len(text) == 1 else 40)
+        draw.text((size / 2, size / 2), text, font=font, fill="white", anchor="mm")
     return img
 
 
@@ -406,8 +385,6 @@ class App:
             # default=True → 아이콘 좌클릭 시 실행
             item(lambda _: "주간 보기" if self.cfg["view"] == "five_hour" else "5시간 보기",
                  self._toggle_view, default=True),
-            item("세로 2단 아이콘 (위 5시간 / 아래 주간)", self._toggle_stacked,
-                 checked=lambda _: self.cfg["stacked"]),
             item("지금 새로고침", lambda: self.wake.set()),
             item("시작 시 실행", lambda: set_autostart(not autostart_enabled()),
                  checked=lambda _: autostart_enabled()),
@@ -424,19 +401,9 @@ class App:
         save_config(self.cfg)
         self._draw_icon()
 
-    def _toggle_stacked(self):
-        self.cfg["stacked"] = not self.cfg["stacked"]
-        save_config(self.cfg)
-        self._draw_icon()
-
     def _draw_icon(self):
-        if self.cfg["stacked"]:
-            usage, stale = icon_usage(self.results, self.last)
-            p5, pw = (usage["five_hour"][0], usage["weekly"][0]) if usage else (None, None)
-            self.icon.icon = render_stacked_icon(p5, pw, stale)
-        else:
-            pct, stale = icon_state(self.results, self.last, self.cfg["view"])
-            self.icon.icon = render_icon(pct, stale)
+        pct, stale = icon_state(self.results, self.last, self.cfg["view"])
+        self.icon.icon = render_icon(pct, stale, VIEW_LABELS[self.cfg["view"]])
 
     def _quit(self):
         self.stopped = True
