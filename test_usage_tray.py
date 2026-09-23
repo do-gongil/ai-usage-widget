@@ -2,6 +2,8 @@
 import importlib.machinery
 import importlib.util
 import json
+import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 _path = Path(__file__).with_name("usage_tray.pyw")
@@ -44,12 +46,50 @@ def test_colors():
     assert ut.color_for(80) == ut.COLOR_CRIT
 
 
-def test_icon_percent_priority():
+def test_icon_state_priority():
     ok = lambda p: {"usage": {"five_hour": (p, None), "weekly": (None, None)}}
-    assert ut.icon_percent({"claude": ok(42), "codex": ok(10)}) == 42
-    assert ut.icon_percent({"codex": ok(10)}) == 10
-    assert ut.icon_percent({"claude": {"error": "오프라인"}, "codex": ok(10)}) is None
-    assert ut.icon_percent({}) is None
+    err = {"error": "오프라인"}
+    assert ut.icon_state({"claude": ok(42), "codex": ok(10)}, {}) == (42, False)
+    assert ut.icon_state({"codex": ok(10)}, {}) == (10, False)
+    assert ut.icon_state({"claude": err, "codex": ok(10)}, {}) == (None, True)
+    assert ut.icon_state({"claude": err}, {"claude": ok(33)}) == (33, True)  # 실패 시 직전 값을 회색으로
+    assert ut.icon_state({}, {}) == (None, True)
+
+
+def test_icon_text():
+    assert [ut.icon_text(p) for p in (None, 5, 42.4, 99.6, 100)] == ["?", "5", "42", "99", "!"]
+
+
+def test_retry_delay():
+    assert ut.retry_delay("30", 0) == 30
+    assert ut.retry_delay("0", 0) == 120  # Retry-After: 0 은 무시하고 백오프
+    assert ut.retry_delay(None, 120) == 240
+    assert ut.retry_delay(None, 480) == ut.MAX_BACKOFF
+    assert ut.retry_delay("99999", 0) == ut.MAX_BACKOFF
+
+
+def test_expire_passed():
+    now = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
+    usage = {"five_hour": (50.0, now - timedelta(minutes=1)), "weekly": (20.0, now + timedelta(days=1))}
+    out = ut.expire_passed(usage, now)
+    assert out["five_hour"] == (0.0, None) and out["weekly"] == usage["weekly"]
+
+
+def test_codex_tail_read():
+    rl = {"primary": {"used_percent": 77}, "secondary": {"used_percent": 5}}
+    line = json.dumps({"payload": {"type": "token_count", "rate_limits": rl}})
+    with tempfile.TemporaryDirectory() as d:
+        orig = ut.CODEX_HOME
+        ut.CODEX_HOME = Path(d)
+        try:
+            f = Path(d, "sessions", "2026", "rollout.jsonl")
+            f.parent.mkdir(parents=True)
+            # 앞부분을 tail 크기보다 크게 채워 잘린 첫 줄이 생기도록
+            f.write_text(("x" * 1000 + "\n") * 400 + line + "\n", encoding="utf-8")
+            r = ut.read_codex()
+            assert r["usage"]["five_hour"][0] == 77.0, r
+        finally:
+            ut.CODEX_HOME = orig
 
 
 def test_tooltip():

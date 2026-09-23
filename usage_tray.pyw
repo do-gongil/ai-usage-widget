@@ -1,8 +1,11 @@
 """Usage Tray — Claude Code / Codex 사용률을 Windows 트레이에 표시한다."""
+import ctypes
 import json
 import os
+import ssl
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -18,6 +21,10 @@ CONFIG_PATH = Path(os.environ.get("APPDATA", HOME)) / APP_NAME / "config.json"
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 TOOLTIP_MAX = 127  # Windows NOTIFYICONDATA szTip 제한
+MAX_BACKOFF = 600  # 429 시 최대 대기(초)
+CODEX_TAIL_BYTES = 256 * 1024
+MUTEX_NAME = "Local\\UsageTray.SingleInstance"
+ERROR_ALREADY_EXISTS = 183
 
 COLOR_OK, COLOR_WARN, COLOR_CRIT, COLOR_UNKNOWN = "#2f9e5b", "#d98a12", "#d33b3b", "#7a8090"
 
@@ -148,16 +155,42 @@ def build_tooltip(lines):
     return text if len(text) <= TOOLTIP_MAX else text[: TOOLTIP_MAX - 1] + "…"
 
 
-def icon_percent(results):
-    """아이콘 숫자: Claude 5h 우선, Claude가 꺼져 있으면 Codex 5h. 우선 agent 실패 시 None(회색 ?)."""
+def icon_state(results, last):
+    """(아이콘 숫자, 오래된 값 여부). Claude 5h 우선, 꺼져 있으면 Codex 5h.
+    조회 실패 시 직전 성공 값을 회색으로, 직전 값도 없으면 (None, True) → 회색 '?'."""
     for agent in ("claude", "codex"):
         if agent in results:
             r = results[agent]
-            return r["usage"]["five_hour"][0] if "usage" in r else None
-    return None
+            if "usage" in r:
+                return r["usage"]["five_hour"][0], False
+            if agent in last:
+                return last[agent]["usage"]["five_hour"][0], True
+            return None, True
+    return None, True
 
 
 # ---------- 조회 ----------
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """리다이렉트를 따라가지 않는다. urllib은 다른 호스트로 갈 때도 Authorization 헤더를 그대로 넘기기 때문."""
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_OPENER = urllib.request.build_opener(
+    _NoRedirect, urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+
+
+def retry_delay(retry_after, previous):
+    """429 대기 시간(초): Retry-After가 있으면 따르고, 없으면 120초부터 2배씩 늘려 최대 600초."""
+    try:
+        seconds = int(retry_after)
+        if seconds > 0:
+            return min(seconds, MAX_BACKOFF)
+    except (TypeError, ValueError):
+        pass
+    return min(max(previous * 2, 120), MAX_BACKOFF)
+
 
 def fetch_claude():
     # ponytail: 토큰 갱신은 Claude Code에 맡긴다. 여기서 credentials 파일을 쓰면 로그인이 깨질 수 있다.
@@ -172,14 +205,31 @@ def fetch_claude():
         "User-Agent": APP_NAME,
     })
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with _OPENER.open(req, timeout=10) as resp:
             return {"usage": parse_claude_usage(json.load(resp))}
     except urllib.error.HTTPError as e:
-        return {"error": "토큰 만료 (Claude Code 실행 필요)" if e.code == 401 else f"HTTP {e.code}"}
+        if e.code == 401:
+            return {"error": "토큰 만료 (Claude Code 실행 필요)"}
+        if e.code == 429:
+            return {"error": "요청 제한, 잠시 후 재시도", "retry_after": e.headers.get("Retry-After")}
+        return {"error": f"HTTP {e.code}"}
     except (urllib.error.URLError, TimeoutError, OSError):
         return {"error": "오프라인"}
     except ValueError:
         return {"error": "응답 형식 오류"}
+
+
+def _read_tail_lines(path):
+    with path.open("rb") as f:
+        f.seek(0, os.SEEK_END)
+        f.seek(max(0, f.tell() - CODEX_TAIL_BYTES))
+        # 잘린 첫 줄은 JSON 파싱에 실패해 자연히 건너뛴다
+        return f.read().decode("utf-8", errors="replace").splitlines()
+
+
+def expire_passed(usage, now):
+    """리셋 시각이 지난 창은 0%로 본다 (오래된 Codex 기록 대응)."""
+    return {k: ((0.0, None) if reset and reset <= now else (pct, reset)) for k, (pct, reset) in usage.items()}
 
 
 def read_codex():
@@ -188,17 +238,17 @@ def read_codex():
         files = sorted(sessions.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
     except OSError:
         files = []
-    # ponytail: 최근 5개 파일을 통째로 읽어 역순 스캔. 세션 파일이 커지면 tail 읽기로 바꿀 것.
+    # ponytail: 최근 5개 파일의 끝 256KB만 본다. token_count가 그보다 앞에만 있으면 다음 파일로 넘어감.
     for path in files[:5]:
         try:
             mtime = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            lines = _read_tail_lines(path)
         except OSError:
             continue
         for line in reversed(lines):
             usage = parse_codex_line(line, mtime)
             if usage:
-                return {"usage": usage, "last_used": mtime}
+                return {"usage": expire_passed(usage, datetime.now(timezone.utc)), "last_used": mtime}
     return {"error": "기록 없음"}
 
 
@@ -213,12 +263,22 @@ def _font(size):
     return ImageFont.load_default()
 
 
-def render_icon(pct):
+def icon_text(pct):
+    if pct is None:
+        return "?"
+    if pct >= 100:
+        return "!"  # 16px에 세 자리는 안 읽힘. 한도 소진은 '!'로 99%와 구분
+    return str(min(99, round(pct)))
+
+
+def render_icon(pct, stale=False):
+    """stale=True: 조회 실패로 직전 값을 보여주는 중 → 회색 배경."""
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=10, fill=color_for(pct))
-    text = "?" if pct is None else str(min(99, round(pct)))  # 100%는 99로: 16px에 세 자리는 안 읽힘
+    fill = COLOR_UNKNOWN if stale else color_for(pct)
+    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=10, fill=fill)
+    text = icon_text(pct)
     font = _font(46 if len(text) == 1 else 40)
     draw.text((size / 2, size / 2), text, font=font, fill="white", anchor="mm")
     return img
@@ -257,12 +317,25 @@ def set_autostart(enabled):
 
 # ---------- 앱 ----------
 
+def acquire_single_instance():
+    """이미 실행 중이면 None. 중복 실행은 트레이 아이콘을 늘리고 API 요청 제한(429)을 부른다."""
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    handle = kernel32.CreateMutexW(None, False, MUTEX_NAME)
+    if not handle or ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
+        return None
+    return handle  # 프로세스 종료 시 OS가 해제
+
+
 class App:
     def __init__(self):
         import pystray
         self.pystray = pystray
         self.cfg = load_config()
         self.last = {}  # agent → 마지막 성공 결과
+        self.claude_prev = None  # 대기 중에 재사용할 직전 Claude 결과
+        self.claude_until = 0.0  # time.monotonic() 기준, 이 시각 전엔 Claude 조회 안 함
+        self.claude_backoff = 0
         self.wake = threading.Event()
         self.stopped = False
         self.icon = pystray.Icon(APP_NAME, render_icon(None), "Usage Tray", menu=self._menu())
@@ -289,10 +362,23 @@ class App:
         self.wake.set()
         self.icon.stop()
 
+    def _claude(self):
+        now = time.monotonic()
+        if self.claude_prev is not None and now < self.claude_until:
+            return self.claude_prev  # 429 대기 중: 새로고침을 눌러도 조회하지 않음
+        result = fetch_claude()
+        if "retry_after" in result:
+            self.claude_backoff = retry_delay(result["retry_after"], self.claude_backoff)
+            self.claude_until = now + self.claude_backoff
+        else:
+            self.claude_backoff = 0
+        self.claude_prev = result
+        return result
+
     def refresh(self):
         results = {}
         if self.cfg["agents"]["claude"]:
-            results["claude"] = fetch_claude()
+            results["claude"] = self._claude()
         if self.cfg["agents"]["codex"]:
             results["codex"] = read_codex()
 
@@ -302,9 +388,12 @@ class App:
                 lines.append(format_line(name, results[agent], self.last.get(agent)))
                 if "usage" in results[agent]:
                     self.last[agent] = results[agent]
-        lines.append(f"갱신 {datetime.now():%H:%M:%S}")
+        if lines:
+            lines.append(f"갱신 {datetime.now():%H:%M:%S}")
 
-        self.icon.icon = render_icon(icon_percent(results))
+        if self.stopped:  # 조회 중 종료됐으면 해제된 아이콘을 건드리지 않음
+            return
+        self.icon.icon = render_icon(*icon_state(results, self.last))
         self.icon.title = build_tooltip(lines)
 
     def _loop(self, icon):
@@ -323,4 +412,5 @@ class App:
 
 
 if __name__ == "__main__":
-    App().run()
+    if acquire_single_instance():
+        App().run()
