@@ -319,16 +319,24 @@ def render_icon(pct, stale=False):
     return img
 
 
+def _glyph(text, width, height):
+    """글자를 크게 그린 뒤 여백을 잘라 (width, height)로 늘린 마스크. 16px 트레이에서 숫자를 최대한 키우기 위함."""
+    mask = Image.new("L", (200, 120), 0)
+    ImageDraw.Draw(mask).text((100, 60), text, font=_font(80), fill=255, anchor="mm")
+    return mask.crop(mask.getbbox()).resize((width, height), Image.LANCZOS)
+
+
 def render_stacked_icon(p5, pw, stale=False):
-    """세로 2단: 위 5시간, 아래 주간. 칸마다 자기 값 기준 색."""
+    """세로 2단: 위 5시간, 아래 주간. 여백 없이 칸을 채우고 숫자는 칸 높이에 맞게 세로로 늘림."""
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    font = _font(34)
-    for (top, bottom), pct in (((0, 31), p5), ((33, 63), pw)):
+    for top, pct in ((0, p5), (32, pw)):
         fill = COLOR_UNKNOWN if stale else color_for(pct)
-        draw.rounded_rectangle((0, top, size - 1, bottom), radius=6, fill=fill)
-        draw.text((size / 2, (top + bottom) / 2 + 1), icon_text(pct), font=font, fill="white", anchor="mm")
+        draw.rectangle((0, top, size - 1, top + 31), fill=fill)
+        text = icon_text(pct)
+        glyph = _glyph(text, 58 if len(text) == 2 else 30, 28)
+        img.paste("white", (size // 2 - glyph.width // 2, top + 2), glyph)
     return img
 
 
