@@ -1,0 +1,326 @@
+"""Usage Tray — Claude Code / Codex 사용률을 Windows 트레이에 표시한다."""
+import json
+import os
+import sys
+import threading
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
+
+APP_NAME = "UsageTray"
+HOME = Path.home()
+CLAUDE_CREDENTIALS = HOME / ".claude" / ".credentials.json"
+CODEX_HOME = Path(os.environ.get("CODEX_HOME") or HOME / ".codex")
+CONFIG_PATH = Path(os.environ.get("APPDATA", HOME)) / APP_NAME / "config.json"
+USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+TOOLTIP_MAX = 127  # Windows NOTIFYICONDATA szTip 제한
+
+COLOR_OK, COLOR_WARN, COLOR_CRIT, COLOR_UNKNOWN = "#2f9e5b", "#d98a12", "#d33b3b", "#7a8090"
+
+
+# ---------- 설정 ----------
+
+def default_config():
+    return {
+        "agents": {"claude": CLAUDE_CREDENTIALS.exists(), "codex": CODEX_HOME.exists()},
+        "interval": 60,
+    }
+
+
+def load_config():
+    try:
+        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        agents = cfg.get("agents", {})
+        return {
+            "agents": {"claude": bool(agents.get("claude")), "codex": bool(agents.get("codex"))},
+            "interval": max(30, int(cfg.get("interval", 60))),
+        }
+    except (OSError, ValueError, TypeError, AttributeError):
+        cfg = default_config()
+        save_config(cfg)
+        return cfg
+
+
+def save_config(cfg):
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+# ---------- 파싱 (순수 함수, 테스트 대상) ----------
+
+def _pct(value):
+    try:
+        return max(0.0, min(100.0, float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_time(value):
+    """ISO 문자열 또는 epoch 초 → aware datetime. 실패 시 None."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value, timezone.utc)
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def parse_claude_usage(data):
+    """/api/oauth/usage 응답 → {'five_hour': (pct, reset), 'weekly': (pct, reset)}"""
+    def window(key):
+        w = (data or {}).get(key) or {}
+        return _pct(w.get("utilization")), _parse_time(w.get("resets_at"))
+    return {"five_hour": window("five_hour"), "weekly": window("seven_day")}
+
+
+def parse_codex_line(line, base_time=None):
+    """rollout jsonl 한 줄 → 사용률 dict. token_count/rate_limits 가 아니면 None."""
+    try:
+        obj = json.loads(line)
+    except ValueError:
+        return None
+    payload = obj.get("payload") if isinstance(obj, dict) else None
+    if not isinstance(payload, dict) or payload.get("type") != "token_count":
+        return None
+    limits = payload.get("rate_limits")
+    if not isinstance(limits, dict):
+        return None
+    base = _parse_time(obj.get("timestamp")) or base_time
+
+    def window(key):
+        w = limits.get(key) or {}
+        reset = _parse_time(w.get("resets_at"))
+        secs = w.get("resets_in_seconds")
+        if reset is None and base is not None and isinstance(secs, (int, float)):
+            reset = datetime.fromtimestamp(base.timestamp() + secs, timezone.utc)
+        return _pct(w.get("used_percent")), reset
+    return {"five_hour": window("primary"), "weekly": window("secondary")}
+
+
+def color_for(pct):
+    if pct is None:
+        return COLOR_UNKNOWN
+    if pct >= 80:
+        return COLOR_CRIT
+    if pct >= 60:
+        return COLOR_WARN
+    return COLOR_OK
+
+
+def _fmt_pct(pct):
+    return "--" if pct is None else f"{pct:.0f}%"
+
+
+def _fmt_time(dt):
+    if dt is None:
+        return ""
+    local = dt.astimezone()
+    if local.date() == datetime.now().astimezone().date():
+        return local.strftime("%H:%M")
+    return local.strftime("%m/%d %H:%M")
+
+
+def format_line(name, result, last=None):
+    """툴팁 한 줄. 실패 시 마지막 성공 값(last)을 괄호로 덧붙인다."""
+    if result.get("error"):
+        line = f"{name}: {result['error']}"
+        if last:
+            line += f" (직전 5h {_fmt_pct(last['usage']['five_hour'][0])})"
+        return line
+    u = result["usage"]
+    (p5, r5), (pw, _) = u["five_hour"], u["weekly"]
+    line = f"{name} 5h {_fmt_pct(p5)} 주 {_fmt_pct(pw)}"
+    if r5:
+        line += f" ↻{_fmt_time(r5)}"
+    if result.get("last_used"):
+        line += f" ({_fmt_time(result['last_used'])} 기준)"
+    return line
+
+
+def build_tooltip(lines):
+    text = "\n".join(lines) or "사용할 agent를 메뉴에서 선택하세요"
+    return text if len(text) <= TOOLTIP_MAX else text[: TOOLTIP_MAX - 1] + "…"
+
+
+def icon_percent(results):
+    """아이콘 숫자: Claude 5h 우선, Claude가 꺼져 있으면 Codex 5h. 우선 agent 실패 시 None(회색 ?)."""
+    for agent in ("claude", "codex"):
+        if agent in results:
+            r = results[agent]
+            return r["usage"]["five_hour"][0] if "usage" in r else None
+    return None
+
+
+# ---------- 조회 ----------
+
+def fetch_claude():
+    # ponytail: 토큰 갱신은 Claude Code에 맡긴다. 여기서 credentials 파일을 쓰면 로그인이 깨질 수 있다.
+    try:
+        creds = json.loads(CLAUDE_CREDENTIALS.read_text(encoding="utf-8"))
+        token = creds["claudeAiOauth"]["accessToken"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"error": "미로그인"}
+    req = urllib.request.Request(USAGE_URL, headers={
+        "Authorization": f"Bearer {token}",
+        "anthropic-beta": "oauth-2025-04-20",
+        "User-Agent": APP_NAME,
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return {"usage": parse_claude_usage(json.load(resp))}
+    except urllib.error.HTTPError as e:
+        return {"error": "토큰 만료 (Claude Code 실행 필요)" if e.code == 401 else f"HTTP {e.code}"}
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return {"error": "오프라인"}
+    except ValueError:
+        return {"error": "응답 형식 오류"}
+
+
+def read_codex():
+    sessions = CODEX_HOME / "sessions"
+    try:
+        files = sorted(sessions.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        files = []
+    # ponytail: 최근 5개 파일을 통째로 읽어 역순 스캔. 세션 파일이 커지면 tail 읽기로 바꿀 것.
+    for path in files[:5]:
+        try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            usage = parse_codex_line(line, mtime)
+            if usage:
+                return {"usage": usage, "last_used": mtime}
+    return {"error": "기록 없음"}
+
+
+# ---------- 아이콘 ----------
+
+def _font(size):
+    for name in ("segoeuib.ttf", "arialbd.ttf"):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            pass
+    return ImageFont.load_default()
+
+
+def render_icon(pct):
+    size = 64
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=10, fill=color_for(pct))
+    text = "?" if pct is None else str(min(99, round(pct)))  # 100%는 99로: 16px에 세 자리는 안 읽힘
+    font = _font(46 if len(text) == 1 else 40)
+    draw.text((size / 2, size / 2), text, font=font, fill="white", anchor="mm")
+    return img
+
+
+# ---------- 시작 시 실행 ----------
+
+def _launch_command():
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}"'
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    return f'"{pythonw}" "{Path(__file__).resolve()}"'
+
+
+def autostart_enabled():
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            winreg.QueryValueEx(key, APP_NAME)
+            return True
+    except OSError:
+        return False
+
+
+def set_autostart(enabled):
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+        if enabled:
+            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, _launch_command())
+        else:
+            try:
+                winreg.DeleteValue(key, APP_NAME)
+            except FileNotFoundError:
+                pass
+
+
+# ---------- 앱 ----------
+
+class App:
+    def __init__(self):
+        import pystray
+        self.pystray = pystray
+        self.cfg = load_config()
+        self.last = {}  # agent → 마지막 성공 결과
+        self.wake = threading.Event()
+        self.stopped = False
+        self.icon = pystray.Icon(APP_NAME, render_icon(None), "Usage Tray", menu=self._menu())
+
+    def _menu(self):
+        item, menu = self.pystray.MenuItem, self.pystray.Menu
+        return menu(
+            item("Claude", lambda: self._toggle("claude"), checked=lambda _: self.cfg["agents"]["claude"]),
+            item("Codex", lambda: self._toggle("codex"), checked=lambda _: self.cfg["agents"]["codex"]),
+            menu.SEPARATOR,
+            item("지금 새로고침", lambda: self.wake.set(), default=True),
+            item("시작 시 실행", lambda: set_autostart(not autostart_enabled()),
+                 checked=lambda _: autostart_enabled()),
+            item("종료", self._quit),
+        )
+
+    def _toggle(self, agent):
+        self.cfg["agents"][agent] = not self.cfg["agents"][agent]
+        save_config(self.cfg)
+        self.wake.set()
+
+    def _quit(self):
+        self.stopped = True
+        self.wake.set()
+        self.icon.stop()
+
+    def refresh(self):
+        results = {}
+        if self.cfg["agents"]["claude"]:
+            results["claude"] = fetch_claude()
+        if self.cfg["agents"]["codex"]:
+            results["codex"] = read_codex()
+
+        lines = []
+        for agent, name in (("claude", "Claude"), ("codex", "Codex")):
+            if agent in results:
+                lines.append(format_line(name, results[agent], self.last.get(agent)))
+                if "usage" in results[agent]:
+                    self.last[agent] = results[agent]
+        lines.append(f"갱신 {datetime.now():%H:%M:%S}")
+
+        self.icon.icon = render_icon(icon_percent(results))
+        self.icon.title = build_tooltip(lines)
+
+    def _loop(self, icon):
+        icon.visible = True
+        while not self.stopped:
+            try:
+                self.refresh()
+            except Exception as e:  # 루프가 죽으면 아이콘이 멈춘 채 남으므로 사유를 툴팁으로
+                self.icon.icon = render_icon(None)
+                self.icon.title = build_tooltip([f"오류: {type(e).__name__}"])
+            self.wake.wait(self.cfg["interval"])
+            self.wake.clear()
+
+    def run(self):
+        self.icon.run(setup=self._loop)
+
+
+if __name__ == "__main__":
+    App().run()
