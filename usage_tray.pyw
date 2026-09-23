@@ -35,6 +35,7 @@ def default_config():
     return {
         "agents": {"claude": CLAUDE_CREDENTIALS.exists(), "codex": CODEX_HOME.exists()},
         "interval": 60,
+        "view": "five_hour",
     }
 
 
@@ -45,6 +46,7 @@ def load_config():
         return {
             "agents": {"claude": bool(agents.get("claude")), "codex": bool(agents.get("codex"))},
             "interval": max(30, int(cfg.get("interval", 60))),
+            "view": "weekly" if cfg.get("view") == "weekly" else "five_hour",
         }
     except (OSError, ValueError, TypeError, AttributeError):
         cfg = default_config()
@@ -155,16 +157,16 @@ def build_tooltip(lines):
     return text if len(text) <= TOOLTIP_MAX else text[: TOOLTIP_MAX - 1] + "…"
 
 
-def icon_state(results, last):
-    """(아이콘 숫자, 오래된 값 여부). Claude 5h 우선, 꺼져 있으면 Codex 5h.
+def icon_state(results, last, view="five_hour"):
+    """(아이콘 숫자, 오래된 값 여부). view: 'five_hour' | 'weekly'. Claude 우선, 꺼져 있으면 Codex.
     조회 실패 시 직전 성공 값을 회색으로, 직전 값도 없으면 (None, True) → 회색 '?'."""
     for agent in ("claude", "codex"):
         if agent in results:
             r = results[agent]
             if "usage" in r:
-                return r["usage"]["five_hour"][0], False
+                return r["usage"][view][0], False
             if agent in last:
-                return last[agent]["usage"]["five_hour"][0], True
+                return last[agent]["usage"][view][0], True
             return None, True
     return None, True
 
@@ -271,16 +273,22 @@ def icon_text(pct):
     return str(min(99, round(pct)))
 
 
-def render_icon(pct, stale=False):
-    """stale=True: 조회 실패로 직전 값을 보여주는 중 → 회색 배경."""
+def render_icon(pct, stale=False, weekly=False):
+    """stale=True: 조회 실패로 직전 값을 보여주는 중 → 회색 배경.
+    weekly=True: 주간 값 → 숫자 아래 흰 밑줄로 5시간 값과 구분."""
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     fill = COLOR_UNKNOWN if stale else color_for(pct)
     draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=10, fill=fill)
     text = icon_text(pct)
-    font = _font(46 if len(text) == 1 else 40)
-    draw.text((size / 2, size / 2), text, font=font, fill="white", anchor="mm")
+    if weekly:
+        font = _font(42 if len(text) == 1 else 36)
+        draw.text((size / 2, 27), text, font=font, fill="white", anchor="mm")
+        draw.rectangle((8, 52, 55, 59), fill="white")
+    else:
+        font = _font(46 if len(text) == 1 else 40)
+        draw.text((size / 2, size / 2), text, font=font, fill="white", anchor="mm")
     return img
 
 
@@ -336,6 +344,7 @@ class App:
         self.claude_prev = None  # 대기 중에 재사용할 직전 Claude 결과
         self.claude_until = 0.0  # time.monotonic() 기준, 이 시각 전엔 Claude 조회 안 함
         self.claude_backoff = 0
+        self.results = {}  # 직전 refresh 결과: 보기 전환 시 재조회 없이 다시 그림
         self.wake = threading.Event()
         self.stopped = False
         self.icon = pystray.Icon(APP_NAME, render_icon(None), "Usage Tray", menu=self._menu())
@@ -346,7 +355,10 @@ class App:
             item("Claude", lambda: self._toggle("claude"), checked=lambda _: self.cfg["agents"]["claude"]),
             item("Codex", lambda: self._toggle("codex"), checked=lambda _: self.cfg["agents"]["codex"]),
             menu.SEPARATOR,
-            item("지금 새로고침", lambda: self.wake.set(), default=True),
+            # default=True → 아이콘 좌클릭 시 실행
+            item(lambda _: "주간 보기" if self.cfg["view"] == "five_hour" else "5시간 보기",
+                 self._toggle_view, default=True),
+            item("지금 새로고침", lambda: self.wake.set()),
             item("시작 시 실행", lambda: set_autostart(not autostart_enabled()),
                  checked=lambda _: autostart_enabled()),
             item("종료", self._quit),
@@ -356,6 +368,15 @@ class App:
         self.cfg["agents"][agent] = not self.cfg["agents"][agent]
         save_config(self.cfg)
         self.wake.set()
+
+    def _toggle_view(self):
+        self.cfg["view"] = "weekly" if self.cfg["view"] == "five_hour" else "five_hour"
+        save_config(self.cfg)
+        self._draw_icon()
+
+    def _draw_icon(self):
+        pct, stale = icon_state(self.results, self.last, self.cfg["view"])
+        self.icon.icon = render_icon(pct, stale, weekly=self.cfg["view"] == "weekly")
 
     def _quit(self):
         self.stopped = True
@@ -393,7 +414,8 @@ class App:
 
         if self.stopped:  # 조회 중 종료됐으면 해제된 아이콘을 건드리지 않음
             return
-        self.icon.icon = render_icon(*icon_state(results, self.last))
+        self.results = results
+        self._draw_icon()
         self.icon.title = build_tooltip(lines)
 
     def _loop(self, icon):

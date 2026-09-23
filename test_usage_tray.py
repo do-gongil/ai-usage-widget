@@ -54,6 +54,10 @@ def test_icon_state_priority():
     assert ut.icon_state({"claude": err, "codex": ok(10)}, {}) == (None, True)
     assert ut.icon_state({"claude": err}, {"claude": ok(33)}) == (33, True)  # 실패 시 직전 값을 회색으로
     assert ut.icon_state({}, {}) == (None, True)
+    both = {"usage": {"five_hour": (42, None), "weekly": (71, None)}}
+    assert ut.icon_state({"claude": both}, {}, "weekly") == (71, False)
+    assert ut.icon_state({"claude": err}, {"claude": both}, "weekly") == (71, True)
+    assert ut.render_icon(71, weekly=True).size == (64, 64)
 
 
 def test_icon_text():
