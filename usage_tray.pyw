@@ -22,6 +22,7 @@ LAST_PATH = CONFIG_PATH.with_name("last.json")
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 TOOLTIP_MAX = 127  # Windows NOTIFYICONDATA szTip 제한
+MIN_INTERVAL = 300  # usage API 제한 창이 약 5분: 더 짧으면 429 (claude-hud도 같은 한도를 공유)
 MAX_BACKOFF = 600  # 429 시 최대 대기(초)
 CODEX_TAIL_BYTES = 256 * 1024
 MUTEX_NAME = "Local\\UsageTray.SingleInstance"
@@ -37,7 +38,7 @@ VIEW_LABELS = {"five_hour": "5", "weekly": "W"}  # 아이콘 좌측 상단 뱃�
 def default_config():
     return {
         "agents": {"claude": CLAUDE_CREDENTIALS.exists(), "codex": CODEX_HOME.exists()},
-        "interval": 60,
+        "interval": MIN_INTERVAL,
         "view": "five_hour",
     }
 
@@ -48,7 +49,7 @@ def load_config():
         agents = cfg.get("agents", {})
         return {
             "agents": {"claude": bool(agents.get("claude")), "codex": bool(agents.get("codex"))},
-            "interval": max(30, int(cfg.get("interval", 60))),
+            "interval": max(MIN_INTERVAL, int(cfg.get("interval", MIN_INTERVAL))),
             "view": "weekly" if cfg.get("view") == "weekly" else "five_hour",
         }
     except (OSError, ValueError, TypeError, AttributeError):

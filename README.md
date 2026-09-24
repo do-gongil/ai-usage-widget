@@ -8,7 +8,7 @@ Claude Code / Codex CLI의 **5시간·주간 세션 사용률**을 Windows 작�
 - 한 번에 하나만 실행됩니다. 요청 제한(429)을 받으면 최대 10분까지 조회 간격을 늘립니다.
 - 마우스 오버: 5시간/주간 %, 리셋 시각, 마지막 갱신 시각
 - 우클릭: Claude / Codex 사용 선택, 5시간·주간 보기, 지금 새로고침, 시작 시 실행, 종료
-- 60초마다 갱신 (`%APPDATA%\UsageTray\config.json`의 `interval`, 최소 30)
+- 5분마다 갱신 (`%APPDATA%\UsageTray\config.json`의 `interval`, 최소 300 — 더 짧으면 429)
 
 ## 설치
 
