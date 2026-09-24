@@ -16,6 +16,7 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 작�
 
 **소스**:
 ```
+https://github.com/do-gongil/usage-tray.git
 pip install -r requirements.txt
 pythonw usage_tray.pyw
 ```
