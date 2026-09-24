@@ -1,6 +1,6 @@
 # Usage Tray
 
-Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 작업 표시줄 트레이에 표시합니다. (Windows 10/11 전용, 비공식 도구)
+Claude Code / Codex CLI의 **5시간·주간 세션 사용률**을 Windows 작업 표시줄 트레이에 표시합니다. (Windows 10/11 전용, 비공식 도구)
 
 - 아이콘 숫자: Claude 사용률 (Claude를 끄면 Codex)
 - **좌클릭: 5시간 ↔ 주간 전환** — 아이콘 좌측 상단에 `5`(5시간) / `W`(주간) 표시, 선택은 저장됨
@@ -16,7 +16,8 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 작�
 
 **소스**:
 ```
-https://github.com/do-gongil/usage-tray.git
+git clone https://github.com/do-gongil/usage-tray.git
+cd usage-tray
 pip install -r requirements.txt
 pythonw usage_tray.pyw
 ```
