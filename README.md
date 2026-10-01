@@ -17,12 +17,24 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트�
 
 **PiP 창**
 - 5시간·주간 사용률 막대와 리셋 시각. 크기 조절 가능, X는 숨기기(종료는 트레이에서)
-- 상단: ↻ 새로고침 · ⚙ 설정(항상 위, 창 색상, 투명도 30–100%) · — 미니 모드 · 갱신 시각
+- 상단: ↻ 새로고침 · 갱신 시각 · ⚙ 설정(항상 위, 창 색상, 투명도 30–100%) · (빈 곳을 잡고 창 이동) · — 미니 모드 · ✕
 - **미니 모드**: 상단 행 없이 작업 표시줄 높이(48px)의 막대만. `—` 버튼 또는 전역 단축키 **Ctrl+Alt+U**로 전환, 오른쪽 ↗ 버튼으로 복귀. 일반/미니 창의 위치·크기는 따로 기억
 
 **공통**
 - 한 번에 하나만 실행됩니다. 5분마다 갱신하고, 요청 제한(429)을 받으면 최대 10분까지 조회 간격을 늘립니다.
 - 설정: `%APPDATA%\UsageTray\config.json` (`interval` 최소 300초 — 더 짧으면 429)
+
+## 설치
+
+1. [Releases](https://github.com/do-gongil/ai-usage-widget/releases/latest)에서 `ai-usage-widget-win-x64.zip`을 받습니다.
+2. 원하는 위치(예: `%LOCALAPPDATA%\ai-usage-widget`)에 압축을 풀고 `UsageWidget\UsageWidget.exe`를 실행합니다. .NET 설치는 필요 없습니다.
+3. 트레이 아이콘을 우클릭해 **시작 시 실행**을 켜 두면 로그인할 때 자동으로 뜹니다.
+
+- **Claude Code에 로그인되어 있어야 합니다**(`claude` 실행 → 로그인). 웹·데스크톱 앱만 쓰는 경우에도 Claude Code로 한 번 로그인하면 같은 계정의 사용률이 표시됩니다.
+- 코드 서명이 없어서 처음 실행할 때 SmartScreen 경고가 뜰 수 있습니다. **추가 정보 → 실행**을 누르세요.
+- Windows의 **Smart App Control**이 켜진 PC에서는 서명 없는 앱이 차단되어 실행되지 않습니다(실행 직후 아무 반응 없이 종료). 이 경우 소스에서 직접 빌드해 보세요(아래).
+- 업데이트: 앱을 트레이에서 종료한 뒤 새 zip의 내용으로 폴더를 덮어씁니다. 설정은 `%APPDATA%\UsageTray`에 있어 유지됩니다.
+- 제거: 트레이에서 "시작 시 실행"을 끄고 종료한 뒤 폴더와 `%APPDATA%\UsageTray`를 삭제합니다.
 
 ## 빌드와 실행
 
@@ -33,7 +45,7 @@ git clone https://github.com/do-gongil/ai-usage-widget.git
 cd ai-usage-widget
 build_widget.bat
 ```
-테스트가 통과하면 `dist\UsageWidget\UsageWidget.exe`가 만들어집니다(.NET 런타임 포함 자체 포함 폴더, 약 160MB).
+테스트가 통과하면 `dist\release\UsageWidget\UsageWidget.exe`(.NET 런타임 포함 자체 포함 폴더, 약 160MB)와 배포용 `dist\ai-usage-widget-win-x64.zip`이 만들어집니다.
 
 개발 중에는 Debug 빌드로 실행합니다.
 ```
@@ -81,7 +93,7 @@ UsageWidget/          WinUI 3 앱
   UsageService.cs       조회·파싱 로직 (UI 의존 없음)
   Settings.cs           config.json / last.json
 UsageWidget.Tests/    UsageService·Settings 단위 테스트 (xUnit)
-build_widget.bat      테스트 → 릴리스 빌드
+build_widget.bat      테스트 → 릴리스 빌드 → zip
 ```
 
 ## 테스트
