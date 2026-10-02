@@ -1,5 +1,5 @@
 """AI Usage Widget (Python 버전) — 트레이 아이콘 + 항상 위 PiP 창.
-pythonw usage_widget.pyw 로 실행. C# 버전과 설정 파일·단일 실행 뮤텍스를 공유한다(둘 중 하나만 실행됨).
+pythonw usage_widget.pyw 로 실행. 한 번에 하나만 실행된다(단일 실행 뮤텍스).
 스레드: tkinter(메인) / pystray(트레이) / 조회 작업 / 전역 단축키. UI 변경은 모두 큐를 거쳐 메인 스레드에서."""
 import ctypes
 import queue
@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 import usage_core as uc
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-MUTEX_NAME = "Local\\UsageTray.SingleInstance"  # C# 버전과 같은 이름: 둘이 동시에 돌면 API 호출이 두 배
+MUTEX_NAME = "Local\\UsageTray.SingleInstance"  # 중복 실행 방지: 둘이 동시에 돌면 API 호출이 두 배가 돼 429
 VIEW_LABELS = {"five_hour": "5", "weekly": "W"}
 COLOR_BADGE = "#1d2230"
 PALETTE = [("기본", None), ("노랑", "#FFF4B8"), ("분홍", "#FFD9EC"), ("하늘", "#D6ECFF"),

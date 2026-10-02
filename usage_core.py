@@ -1,4 +1,4 @@
-"""사용량 조회·파싱·설정 (UI 없음, 테스트 대상). C# 버전(UsageWidget)과 같은 설정 파일·형식을 쓴다."""
+"""사용량 조회·파싱·설정 (UI 없음, 테스트 대상). 설정은 %APPDATA%\\UsageTray\\config.json / last.json."""
 import json
 import os
 import ssl

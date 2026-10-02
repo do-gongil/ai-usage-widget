@@ -128,7 +128,7 @@ def _with_config_dir(fn):
 
 def test_config_compat_and_clamp():
     def run(d):
-        # C# 버전이 쓴 설정 + 범위를 벗어난 값
+        # 이전 버전이 쓴 설정 + 범위를 벗어난 값
         (d / "config.json").write_text(json.dumps({
             "agents": {"claude": True, "codex": False}, "interval": 999999999, "view": "weekly",
             "pip": {"visible": False, "rect": [1, 2, 300, 130], "mini": True, "mini_rect": [1, 2, 300, 48],
