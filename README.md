@@ -65,6 +65,21 @@ bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\UsageWidget.exe
 Windows의 Smart App Control이 켜져 있으면 서명 없는 빌드가 차단될 수 있습니다(실행 직후 종료, 이벤트 로그에 `애플리케이션 제어 정책에서 이 파일을 차단했습니다`).
 빌드마다 판단이 달라서 `dotnet build --no-incremental`로 다시 빌드하면 통과하기도 하지만, 확실한 방법은 코드 서명(Azure Trusted Signing 등)이나 Microsoft Store(MSIX) 배포입니다.
 
+## Python 버전 (Smart App Control이 켜진 PC용)
+
+`python/`은 같은 기능(트레이 아이콘, PiP 창, 설정 팔레트, 미니 모드·Ctrl+Alt+U, 429 예방)을 Python으로 만든 버전입니다.
+서명된 `pythonw.exe`가 스크립트를 실행하므로 **Smart App Control이 켜져 있어도 차단되지 않습니다.** 설정 파일과 단일 실행 뮤텍스를 C# 버전과 공유하므로 둘 중 하나만 실행됩니다.
+
+```
+cd python
+pip install -r requirements.txt
+pythonw usage_widget.pyw
+```
+
+- 트레이 아이콘 좌클릭: PiP 보이기/숨기기. 트레이 우클릭 메뉴의 "시작 시 실행"은 `pythonw usage_widget.pyw`를 자동 실행 항목으로 등록합니다.
+- PiP 창은 테두리 없는 위젯 창이라 작업 표시줄에 나타나지 않습니다. 빈 곳을 끌어 옮기고, 오른쪽 아래 `◢`로 크기를 조절합니다.
+- 테스트: `python test_usage_core.py` (또는 `pytest`)
+
 ## 아이콘을 항상 보이게 하기
 
 새 트레이 아이콘은 기본적으로 `^` 숨김 영역에 들어갑니다.
