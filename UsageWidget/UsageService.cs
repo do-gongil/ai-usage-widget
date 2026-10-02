@@ -190,6 +190,17 @@ public static class UsageService
         return Math.Min(Math.Max(previous * 2, 120), MaxBackoff);
     }
 
+    /// Claude 조회 여부 (시각은 Environment.TickCount64 ms).
+    /// 429 대기 중이거나, 직전 성공 후 MinInterval이 안 지났으면 조회하지 않는다:
+    /// 메뉴 토글·새로고침 연타가 5분 제한 창 안에서 다시 호출해 429를 받는 것을 막는다.
+    public static bool ShouldFetch(AgentResult? prev, long now, long backoffUntil, long lastOkAt)
+    {
+        if (prev == null) return true;
+        if (now < backoffUntil) return false;
+        // 5초 여유: 정기 조회(조회가 끝난 뒤 Interval 대기)가 경계에서 막히지 않게
+        return prev.Usage == null || now - lastOkAt >= (MinInterval - 5) * 1000L;
+    }
+
     // 리다이렉트를 따라가지 않는다: 다른 호스트로 Authorization 헤더가 넘어가지 않게.
     static readonly HttpClient Http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(10) };
 

@@ -38,7 +38,8 @@ public sealed class Config
             {
                 Claude = agents?["claude"]?.GetValue<bool>() ?? false,
                 Codex = agents?["codex"]?.GetValue<bool>() ?? false,
-                Interval = Math.Max(UsageService.MinInterval, o["interval"]?.GetValue<int>() ?? UsageService.MinInterval),
+                // 상한: 너무 크면 Task.Delay가 예외를 던져 조회 루프가 멈춘다
+                Interval = Math.Clamp(o["interval"]?.GetValue<int>() ?? UsageService.MinInterval, UsageService.MinInterval, MaxInterval),
                 View = (string?)o["view"] == "weekly" ? "weekly" : "five_hour",
                 PipVisible = pip?["visible"]?.GetValue<bool>() ?? true,
                 PipRect = Rect(pip?["rect"]),
@@ -60,6 +61,16 @@ public sealed class Config
             cfg.Save();
             return cfg;
         }
+    }
+
+    public const int MaxInterval = 86400; // 1일
+
+    /// 임시 파일에 다 쓴 뒤 교체: 쓰는 도중 꺼져도 기존 파일이 반쯤 잘린 채 남지 않는다
+    static void WriteAtomic(string path, string text)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, text, Encoding.UTF8);
+        File.Move(tmp, path, overwrite: true);
     }
 
     public static bool IsHex(string? s) =>
@@ -88,7 +99,7 @@ public sealed class Config
         try
         {
             Directory.CreateDirectory(Dir);
-            File.WriteAllText(ConfigPath, o.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
+            WriteAtomic(ConfigPath, o.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // 설정 저장 실패로 앱이 죽지 않게
     }
@@ -104,7 +115,7 @@ public sealed class Config
         try
         {
             Directory.CreateDirectory(Dir);
-            File.WriteAllText(LastPath, o.ToJsonString(), Encoding.UTF8);
+            WriteAtomic(LastPath, o.ToJsonString());
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // 캐시일 뿐
     }

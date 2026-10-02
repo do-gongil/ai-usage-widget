@@ -33,7 +33,8 @@ public sealed partial class MainWindow : Window
         SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragArea);
-        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico")); // 작업 표시줄·Alt+Tab 아이콘
+        var icon = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"); // 작업 표시줄·Alt+Tab 아이콘
+        if (File.Exists(icon)) AppWindow.SetIcon(icon); // 파일이 없으면 기본 아이콘 (시작 시 예외로 죽지 않게)
 
         // CompactOverlay는 크기 조절 폭이 OS 제한에 묶여 있어, 항상 위 + 크기 조절 가능한 일반 창으로 PiP를 만든다
         _presenter = OverlappedPresenter.Create();
@@ -54,6 +55,8 @@ public sealed partial class MainWindow : Window
         RegisterToggleHotkey();
         // 닫기(X) 영역 폭은 창이 그려진 뒤에야 확정되므로 크기가 바뀔 때마다 맞춘다
         Root.SizeChanged += (_, _) => AlignMiniButton();
+        // 옮기거나 크기를 바꾸면 곧바로 저장: 재부팅·로그오프로 꺼져도 위치가 유지되게
+        AppWindow.Changed += (_, a) => { if (a.DidPositionChange || a.DidSizeChange) ScheduleSave(); };
 
         AppWindow.Closing += (_, e) => { e.Cancel = true; SetVisible(false); };
     }
@@ -88,6 +91,22 @@ public sealed partial class MainWindow : Window
         if (_cfg.PipMini) _cfg.PipMiniRect = rect;
         else _cfg.PipRect = rect;
         _cfg.Save();
+    }
+
+    Microsoft.UI.Dispatching.DispatcherQueueTimer? _saveTimer;
+
+    /// 창 이동·크기 조절·투명도 슬라이더처럼 연달아 바뀌는 값은 마지막 변경 0.5초 뒤 한 번만 저장
+    void ScheduleSave()
+    {
+        if (_saveTimer == null)
+        {
+            _saveTimer = DispatcherQueue.CreateTimer();
+            _saveTimer.Interval = TimeSpan.FromMilliseconds(500);
+            _saveTimer.IsRepeating = false;
+            _saveTimer.Tick += (_, _) => { if (IsShown) SaveRect(); else _cfg.Save(); };
+        }
+        _saveTimer.Stop();
+        _saveTimer.Start();
     }
 
     // ---------- 미니 모드 ----------
@@ -161,7 +180,8 @@ public sealed partial class MainWindow : Window
     {
         _subclass = (h, msg, w, l, _, _) =>
         {
-            if (msg == WM_HOTKEY && w == 1) { ToggleMini(); return IntPtr.Zero; }
+            // 네이티브 콜백 안에서 UI를 바꾸다 예외가 나면 프로세스가 즉시 종료되므로, 메시지 처리 후로 미룬다
+            if (msg == WM_HOTKEY && w == 1) { DispatcherQueue.TryEnqueue(ToggleMini); return IntPtr.Zero; }
             return DefSubclassProc(h, msg, w, l);
         };
         SetWindowSubclass(_hwnd, _subclass, 1, 0);
@@ -185,7 +205,7 @@ public sealed partial class MainWindow : Window
         if (!_ready) return;
         _cfg.PipOpacity = (int)e.NewValue;
         ApplyOpacity();
-        _cfg.Save();
+        ScheduleSave(); // 드래그 중 매 틱마다 파일을 쓰지 않게
     }
 
     void BuildSwatches()

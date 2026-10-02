@@ -175,4 +175,37 @@ public class UsageServiceTests
         Assert.Equal("Claude: 오프라인 (직전 5h 42%)", S.FormatLine("Claude", new(Error: "오프라인"), ok));
         Assert.Equal(S.TooltipMax, S.BuildTooltip([new string('x', 300)]).Length);
     }
+
+    [Fact]
+    public void ShouldFetch()
+    {
+        const long sec = 1000, now = 1_000_000 * sec;
+        var ok = Ok(42);
+        var err = new AgentResult(Error: "오프라인");
+        Assert.True(S.ShouldFetch(null, now, 0, 0)); // 첫 조회
+        Assert.False(S.ShouldFetch(ok, now, now + 60 * sec, 0)); // 429 대기 중
+        Assert.False(S.ShouldFetch(err, now, now + 60 * sec, 0));
+        Assert.False(S.ShouldFetch(ok, now, 0, now - 10 * sec)); // 성공 직후 새로고침 연타
+        Assert.True(S.ShouldFetch(ok, now, 0, now - (S.MinInterval - 5) * sec)); // 정기 조회 경계
+        Assert.True(S.ShouldFetch(err, now, 0, now - 10 * sec)); // 직전이 실패면 바로 재시도
+    }
+
+    [Fact]
+    public void ConfigIntervalClampAndAtomicSave()
+    {
+        var orig = Config.Dir;
+        Config.Dir = Directory.CreateTempSubdirectory().FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(Config.Dir, "config.json"), """{"agents":{"claude":true},"interval":999999999}""");
+            var c = Config.Load();
+            Assert.Equal(Config.MaxInterval, c.Interval);
+            c.PipOpacity = 55;
+            c.Save();
+            Assert.Equal(55, Config.Load().PipOpacity);
+            Config.SaveLast(D(("claude", Ok(1, 2))));
+            Assert.Empty(Directory.GetFiles(Config.Dir, "*.tmp")); // 임시 파일이 남지 않음
+        }
+        finally { Config.Dir = orig; }
+    }
 }

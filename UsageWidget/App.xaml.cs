@@ -29,10 +29,20 @@ public partial class App : Application
     AgentResult? _claudePrev;
     long _claudeUntil; // Environment.TickCount64 기준, 이 시각 전엔 Claude 조회 안 함
     int _claudeBackoff;
+    long _claudeOkAt; // 마지막 조회 성공 시각 (TickCount64)
     TaskCompletionSource _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
     bool _stopped;
 
-    public App() => InitializeComponent();
+    public App()
+    {
+        InitializeComponent();
+        // 처리 못한 UI 예외로 트레이 앱이 메시지 없이 사라지지 않게: 삼키고 툴팁에 사유만 남긴다
+        UnhandledException += (_, e) =>
+        {
+            e.Handled = true;
+            if (_tray != null) _tray.ToolTipText = S.BuildTooltip([$"오류: {e.Exception.GetType().Name}"]);
+        };
+    }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
@@ -115,11 +125,13 @@ public partial class App : Application
     void Quit()
     {
         _stopped = true;
-        _pip.SaveRect();
-        _tray.Dispose();
-        _icon?.Dispose();
-        _mutex?.ReleaseMutex();
-        Exit();
+        try
+        {
+            _pip.SaveRect();
+            _tray.Dispose();
+            _icon?.Dispose();
+        }
+        finally { Exit(); } // 정리 중 예외가 나도 종료는 한다. 뮤텍스는 프로세스 종료 시 OS가 해제
     }
 
     // ---------- 조회 루프 ----------
@@ -127,9 +139,10 @@ public partial class App : Application
     async Task<AgentResult> ClaudeAsync()
     {
         var now = Environment.TickCount64;
-        if (_claudePrev != null && now < _claudeUntil)
-            return _claudePrev; // 429 대기 중: 새로고침을 눌러도 조회하지 않음
+        if (!S.ShouldFetch(_claudePrev, now, _claudeUntil, _claudeOkAt))
+            return _claudePrev!; // 429 대기 중이거나 직전 성공 후 5분 미만: 직전 결과 재사용
         var result = await S.FetchClaudeAsync();
+        if (result.Usage != null) _claudeOkAt = Environment.TickCount64;
         if (result.RetryAfter != null)
         {
             _claudeBackoff = S.RetryDelay(result.RetryAfter, _claudeBackoff);
@@ -171,8 +184,12 @@ public partial class App : Application
             try { await RefreshAsync(); }
             catch (Exception e) // 루프가 죽으면 아이콘이 멈춘 채 남으므로 사유를 툴팁으로
             {
-                SetIcon(RenderIcon(null, true, null));
-                _tray.ToolTipText = S.BuildTooltip([$"오류: {e.GetType().Name}"]);
+                try
+                {
+                    SetIcon(RenderIcon(null, true, null));
+                    _tray.ToolTipText = S.BuildTooltip([$"오류: {e.GetType().Name}"]);
+                }
+                catch (Exception) { } // 표시에 실패해도 루프는 계속 돈다
             }
             await Task.WhenAny(_wake.Task, Task.Delay(TimeSpan.FromSeconds(_cfg.Interval)));
             _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -261,9 +278,14 @@ public partial class App : Application
 
     static void SetAutostart(bool enabled)
     {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
-        if (key == null) return;
-        if (enabled) key.SetValue(S.AppName, $"\"{Environment.ProcessPath}\"");
-        else key.DeleteValue(S.AppName, throwOnMissingValue: false);
+        // 레지스트리 정책 등으로 실패해도 앱은 계속 (메뉴 체크는 열 때마다 실제 상태를 다시 읽는다)
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
+            if (key == null) return;
+            if (!enabled) key.DeleteValue(S.AppName, throwOnMissingValue: false);
+            else if (Environment.ProcessPath is { } path) key.SetValue(S.AppName, $"\"{path}\"");
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or IOException) { }
     }
 }
