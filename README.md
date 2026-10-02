@@ -100,10 +100,15 @@ UsageWidget/          WinUI 3 앱
 UsageWidget.Tests/    UsageService·Settings 단위 테스트 (xUnit)
 build_widget.bat      테스트 → 릴리스 빌드 → zip → 설치 파일
 installer.iss         Inno Setup 설치 스크립트
+python/               Python 버전
+  usage_widget.pyw      트레이(pystray) + PiP 창(tkinter)
+  usage_core.py         조회·파싱·설정 (UI 없음)
+  test_usage_core.py    단위 테스트
 ```
 
 ## 테스트
 
 ```
 dotnet test UsageWidget.Tests
+python python/test_usage_core.py
 ```
