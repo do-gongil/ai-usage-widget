@@ -255,6 +255,9 @@ class Pip:
         if not self.is_shown():
             return
         r = self.root
+        # 직전에 요청한 크기 변경(모드 전환)이 아직 적용 전이면 winfo가 옛 크기를 돌려준다.
+        # 같은 틱에 전환이 두 번 오면 일반 창 크기가 미니 크기로 저장되던 버그의 원인.
+        r.update_idletasks()
         rect = [r.winfo_x(), r.winfo_y(), r.winfo_width(), r.winfo_height()]
         self.cfg["pip"]["mini_rect" if self.cfg["pip"]["mini"] else "rect"] = rect
         uc.save_config(self.cfg)
@@ -286,8 +289,17 @@ class Pip:
         p = self.cfg["pip"]
         mini = p["mini"]
         rect = p["mini_rect"] if mini else p["rect"]
+        other = p["rect"] if mini else p["mini_rect"]
+        # 예전 버그로 미니 크기에 일반 창 높이가 저장된 경우는 무시하고 기본 미니 높이로
+        if mini and rect and other and rect[3] == other[3]:
+            rect = None
         if not (rect and _on_screen(rect)):
-            x, y = (100, 100) if initial else (self.root.winfo_x(), self.root.winfo_y())
+            if not initial:
+                x, y = self.root.winfo_x(), self.root.winfo_y()
+            elif other and _on_screen(other):
+                x, y = other[0], other[1]  # 처음 열 때: 다른 모드의 위치를 이어받음
+            else:
+                x, y = 100, 100
             agents = max(1, sum(self.cfg["agents"].values()))
             # 미니 기본 높이: 작업 표시줄 높이(48), agent가 둘이면 행 수만큼 늘림
             h = self.px(48 + 36 * (agents - 1)) if mini else self.px(130 + 50 * (agents - 1))
