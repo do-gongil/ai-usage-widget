@@ -1,10 +1,10 @@
-# AI Usage Widget — 개인정보처리방침 / Privacy Policy
+# Session Usage Widget — 개인정보처리방침 / Privacy Policy
 
 최종 수정: 2026-10-02
 
 ## 한국어
 
-AI Usage Widget(이하 "앱")은 사용자의 PC에서만 동작하며, 개발자는 어떤 데이터도 수집하지 않습니다.
+Session Usage Widget(이하 "앱")은 사용자의 PC에서만 동작하며, 개발자는 어떤 데이터도 수집하지 않습니다.
 
 - **읽는 정보**
   - Claude Code 로그인 정보(`%USERPROFILE%\.claude\.credentials.json`)의 액세스 토큰: Claude 사용량을 조회하는 데만 씁니다.
@@ -20,7 +20,7 @@ AI Usage Widget(이하 "앱")은 사용자의 PC에서만 동작하며, 개발�
 
 ## English
 
-AI Usage Widget (the "App") runs entirely on your PC. The developer collects no data.
+Session Usage Widget (the "App") runs entirely on your PC. The developer collects no data.
 
 - **Data read**: the access token in Claude Code's credentials file (`%USERPROFILE%\.claude\.credentials.json`), used only to query Claude usage; and Codex session logs (`%USERPROFILE%\.codex\sessions`), read locally.
 - **Network**: the token is sent only to Anthropic's usage endpoint (`https://api.anthropic.com/api/oauth/usage`). Nothing is sent anywhere else, including to the developer.

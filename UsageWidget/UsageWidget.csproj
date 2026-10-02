@@ -8,8 +8,8 @@
     <!-- exe 버전 정보: 비어 있으면 출처 불명 파일로 보이기 쉽다 -->
     <Authors>do-gongil</Authors>
     <Company>do-gongil</Company>
-    <Product>AI Usage Widget</Product>
-    <AssemblyTitle>AI Usage Widget</AssemblyTitle> <!-- 파일 속성의 "파일 설명" -->
+    <Product>Session Usage Widget</Product>
+    <AssemblyTitle>Session Usage Widget</AssemblyTitle> <!-- 파일 속성의 "파일 설명" -->
     <Description>Claude Code / Codex usage widget (unofficial)</Description>
     <Copyright>Copyright (c) 2026 do-gongil</Copyright>
     <!-- 배포본에 .pdb(로컬 빌드 경로 포함)를 넣지 않는다 -->

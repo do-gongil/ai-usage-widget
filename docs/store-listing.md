@@ -13,7 +13,7 @@ Partner Center 제출 화면에 그대로 붙여 넣는 값들입니다.
 
 ## 1. 앱 이름
 
-AI Usage Widget
+Session Usage Widget
 
 > "Claude", "Codex"는 상표라서 앱 이름에는 넣지 않고, 설명에만 호환 대상으로 적습니다.
 
