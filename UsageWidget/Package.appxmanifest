@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Identity Name/Publisher, PublisherDisplayName은 Partner Center > 제품 ID 페이지 값으로 바꿔야 Store 업로드가 통과한다 -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 rescap">
+
+  <Identity
+    Name="REPLACE.AIUsageWidget"
+    Publisher="CN=REPLACE-WITH-PARTNER-CENTER-PUBLISHER-ID"
+    Version="1.0.2.0" />
+
+  <Properties>
+    <DisplayName>AI Usage Widget</DisplayName>
+    <PublisherDisplayName>do-gongil</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="ko-KR" />
+  </Resources>
+
+  <Applications>
+    <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="$targetentrypoint$">
+      <uap:VisualElements
+        DisplayName="AI Usage Widget"
+        Description="Claude Code / Codex 사용량 위젯 (비공식)"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <!-- 트레이 메뉴 "시작 시 실행" (App.xaml.cs StartupTaskId와 같아야 함). 기본은 꺼짐 -->
+        <uap5:Extension Category="windows.startupTask">
+          <uap5:StartupTask TaskId="UsageWidgetStartup" Enabled="false" DisplayName="AI Usage Widget" />
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <!-- 데스크톱(Win32) 앱으로 실행: ~/.claude, ~/.codex 읽기에 필요. Store 제출 시 사유 입력 필요 -->
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>
