@@ -26,15 +26,20 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트�
 
 ## 설치
 
-1. [Releases](https://github.com/do-gongil/ai-usage-widget/releases/latest)에서 `ai-usage-widget-win-x64.zip`을 받습니다.
-2. 원하는 위치(예: `%LOCALAPPDATA%\ai-usage-widget`)에 압축을 풀고 `UsageWidget\UsageWidget.exe`를 실행합니다. .NET 설치는 필요 없습니다.
-3. 트레이 아이콘을 우클릭해 **시작 시 실행**을 켜 두면 로그인할 때 자동으로 뜹니다.
+**설치 파일 (추천)**
+1. [Releases](https://github.com/do-gongil/ai-usage-widget/releases/latest)에서 `ai-usage-widget-setup.exe`를 받아 실행합니다. 관리자 권한은 필요 없고, `%LOCALAPPDATA%\Programs\ai-usage-widget`에 설치되며 시작 메뉴에 등록됩니다.
+2. 트레이 아이콘을 우클릭해 **시작 시 실행**을 켜 두면 로그인할 때 자동으로 뜹니다.
+3. 업데이트는 새 설치 파일을 실행하면 되고, 제거는 Windows 설정 → 앱에서 "AI Usage Widget"을 제거합니다(설정 `%APPDATA%\UsageTray`는 남습니다).
+
+**zip (설치 없이)**
+1. Releases에서 `ai-usage-widget-win-x64.zip`을 받아 원하는 위치에 압축을 풉니다.
+2. `UsageWidget\UsageWidget.exe`를 실행합니다. .NET 설치는 필요 없습니다.
 
 - **Claude Code에 로그인되어 있어야 합니다**(`claude` 실행 → 로그인). 웹·데스크톱 앱만 쓰는 경우에도 Claude Code로 한 번 로그인하면 같은 계정의 사용률이 표시됩니다.
 - 코드 서명이 없어서 처음 실행할 때 SmartScreen 경고가 뜰 수 있습니다. **추가 정보 → 실행**을 누르세요.
 - Windows의 **Smart App Control**이 켜진 PC에서는 서명 없는 앱이 차단되어 실행되지 않습니다(실행 직후 아무 반응 없이 종료). 이 경우 소스에서 직접 빌드해 보세요(아래).
-- 업데이트: 앱을 트레이에서 종료한 뒤 새 zip의 내용으로 폴더를 덮어씁니다. 설정은 `%APPDATA%\UsageTray`에 있어 유지됩니다.
-- 제거: 트레이에서 "시작 시 실행"을 끄고 종료한 뒤 폴더와 `%APPDATA%\UsageTray`를 삭제합니다.
+- zip 업데이트: 앱을 트레이에서 종료한 뒤 새 zip의 내용으로 폴더를 덮어씁니다. 설정은 `%APPDATA%\UsageTray`에 있어 유지됩니다.
+- zip 제거: 트레이에서 "시작 시 실행"을 끄고 종료한 뒤 폴더와 `%APPDATA%\UsageTray`를 삭제합니다.
 
 ## 빌드와 실행
 
@@ -93,7 +98,8 @@ UsageWidget/          WinUI 3 앱
   UsageService.cs       조회·파싱 로직 (UI 의존 없음)
   Settings.cs           config.json / last.json
 UsageWidget.Tests/    UsageService·Settings 단위 테스트 (xUnit)
-build_widget.bat      테스트 → 릴리스 빌드 → zip
+build_widget.bat      테스트 → 릴리스 빌드 → zip → 설치 파일
+installer.iss         Inno Setup 설치 스크립트
 ```
 
 ## 테스트
