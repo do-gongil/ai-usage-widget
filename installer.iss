@@ -17,6 +17,7 @@ DefaultGroupName=AI Usage Widget
 DisableProgramGroupPage=yes
 OutputDir=dist
 OutputBaseFilename=ai-usage-widget-setup
+SetupIconFile=UsageWidget\Assets\app.ico
 Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible

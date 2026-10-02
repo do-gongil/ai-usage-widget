@@ -33,6 +33,7 @@ public sealed partial class MainWindow : Window
         SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragArea);
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico")); // 작업 표시줄·Alt+Tab 아이콘
 
         // CompactOverlay는 크기 조절 폭이 OS 제한에 묶여 있어, 항상 위 + 크기 조절 가능한 일반 창으로 PiP를 만든다
         _presenter = OverlappedPresenter.Create();
