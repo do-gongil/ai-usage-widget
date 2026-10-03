@@ -47,6 +47,7 @@ public sealed partial class MainWindow : Window
         _presenter.IsMinimizable = false;
         AppWindow.SetPresenter(_presenter);
         _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        RegisterToggleHotkey(); // 창 서브클래스는 첫 MoveAndResize·ApplyBackground보다 먼저: 투명 모드의 바탕면 지우기를 가로채야 한다
 
         TopMostSwitch.IsOn = cfg.PipTopMost;
         OpacitySlider.Value = cfg.PipOpacity;
@@ -55,7 +56,6 @@ public sealed partial class MainWindow : Window
         ApplyOpacity();
         _ready = true;
         ApplyMode();
-        RegisterToggleHotkey();
         // 닫기(X) 영역 폭은 창이 그려진 뒤에야 확정되므로 크기가 바뀔 때마다 맞춘다
         Root.SizeChanged += (_, _) => AlignMiniButton();
         // 옮기거나 크기를 바꾸면 곧바로 저장: 재부팅·로그오프로 꺼져도 위치가 유지되게
