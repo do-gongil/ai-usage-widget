@@ -17,24 +17,24 @@ Session Usage Widget
 
 > "Claude", "Codex"는 상표라서 앱 이름에는 넣지 않고, 설명에만 호환 대상으로 적습니다.
 
-## 2. 설명 (ko-KR)
+## 2. 설명 (ko-KR 목록에 영어로 입력)
 
-Claude Code와 Codex의 사용량(5시간·주간 한도)을 작은 항상 위 창과 트레이 아이콘으로 보여 주는 위젯입니다.
+A small always-on-top widget and tray icon that shows your Claude Code and Codex usage (5-hour and weekly limits).
 
-- 5시간 / 주간 사용률과 초기화까지 남은 시간 표시
-- 항상 위 PiP 창, 작업 표시줄 높이의 미니 모드 (Ctrl+Alt+U)
-- 창 색상·투명도 설정, Windows 시작 시 실행
-- 모든 처리는 PC 안에서 이뤄지며 개발자에게 데이터를 보내지 않습니다
+- 5-hour / weekly usage and time until reset
+- Always-on-top PiP window and a taskbar-height mini mode (Ctrl+Alt+U)
+- Window color and opacity settings, launch at Windows startup
+- Everything runs on your PC; no data is sent to the developer
 
-이 앱은 Anthropic 또는 OpenAI와 관련이 없는 비공식 앱입니다. Claude Code 또는 Codex CLI에 로그인되어 있어야 합니다.
+This is an unofficial app and is not affiliated with Anthropic or OpenAI. You need to be signed in to Claude Code or the Codex CLI.
 
 ## 3. 짧은 설명
 
-Claude Code / Codex 사용량을 바로 확인하는 비공식 위젯
+Unofficial widget to check your Claude Code / Codex usage at a glance
 
-## 4. 키워드 (최대 7개)
+## 4. 키워드 (최대 7개, "Claude Code"·"Codex"는 거부됨)
 
-usage, widget, Claude Code, Codex, rate limit, tray, 사용량
+usage, widget, rate limit, tray, AI usage, token monitor, Always-on-top widget
 
 ## 5. 기타 항목
 
