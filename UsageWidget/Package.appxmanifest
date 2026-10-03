@@ -10,7 +10,7 @@
   <Identity
     Name="do-gongil.SessionUsageWidget"
     Publisher="CN=8A0D2FAE-92B2-43C4-9A54-3A72B78168BE"
-    Version="1.0.2.0" />
+    Version="1.0.3.0" />
 
   <Properties>
     <DisplayName>Session Usage Widget</DisplayName>

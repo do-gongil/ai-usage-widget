@@ -119,7 +119,7 @@ public sealed partial class MainWindow : Window
         SaveRect();
         _cfg.PipMini = !_cfg.PipMini;
         _cfg.Save();
-        ApplyMode();
+        ApplyMode(keepPosition: true);
         if (!IsShown) SetVisible(true);
     }
 
@@ -137,7 +137,18 @@ public sealed partial class MainWindow : Window
         MiniButton.Margin = new Thickness(0, 0, Math.Max(0, inset - Root.Padding.Right), 0);
     }
 
-    void ApplyMode()
+    /// 지금 위치에서 크기만 바꾸되, 커진 창이 작업 영역(작업 표시줄 제외) 밖으로 나가지 않게 안쪽으로 민다
+    static RectInt32 KeepInWorkArea(RectInt32 r)
+    {
+        var wa = DisplayArea.GetFromRect(r, DisplayAreaFallback.Nearest).WorkArea;
+        return new RectInt32(
+            Math.Clamp(r.X, wa.X, Math.Max(wa.X, wa.X + wa.Width - r.Width)),
+            Math.Clamp(r.Y, wa.Y, Math.Max(wa.Y, wa.Y + wa.Height - r.Height)),
+            r.Width, r.Height);
+    }
+
+    /// keepPosition: 모드 전환 시 그 모드에 저장된 위치로 튀지 않고 지금 자리에 둔다 (크기만 모드별로 기억)
+    void ApplyMode(bool keepPosition = false)
     {
         var mini = _cfg.PipMini;
         Header.Visibility = mini ? Visibility.Collapsed : Visibility.Visible;
@@ -154,6 +165,7 @@ public sealed partial class MainWindow : Window
         // 처음 전환할 때: 지금 위치에서 작업 표시줄 높이(48)로 / 일반 창 기본 크기로
         var rect = r is { Length: 4 } && IsOnScreen(r) ? new RectInt32(r[0], r[1], r[2], r[3])
             : mini ? new RectInt32(p.X, p.Y, Px(300), Px(48)) : new RectInt32(p.X, p.Y, Px(300), Px(130));
+        if (keepPosition) rect = KeepInWorkArea(new RectInt32(p.X, p.Y, rect.Width, rect.Height));
         // 제목 표시줄 제거/복원이 뒤늦게 창 크기를 다시 계산하므로, 잠시 뒤 한 번 더 적용한다
         // ponytail: 150ms는 경험값. 느린 PC에서 크기가 어긋나면 늘릴 것
         AppWindow.MoveAndResize(rect);
