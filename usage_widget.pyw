@@ -104,6 +104,24 @@ def _on_screen(rect):
     return bool(user32.MonitorFromRect(ctypes.byref(r), 0))  # MONITOR_DEFAULTTONULL
 
 
+class _MonitorInfo(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+
+def _keep_in_work_area(rect):
+    """크기가 바뀐 창이 작업 영역(작업 표시줄 제외) 밖으로 나가면 안쪽으로 민다."""
+    x, y, w, h = rect
+    r = wintypes.RECT(x, y, x + w, y + h)
+    mi = _MonitorInfo(cbSize=ctypes.sizeof(_MonitorInfo))
+    user32.MonitorFromRect.restype = wintypes.HMONITOR
+    if not user32.GetMonitorInfoW(user32.MonitorFromRect(ctypes.byref(r), 2), ctypes.byref(mi)):  # NEAREST
+        return rect
+    wa = mi.rcWork
+    return [min(max(x, wa.left), max(wa.left, wa.right - w)),
+            min(max(y, wa.top), max(wa.top, wa.bottom - h)), w, h]
+
+
 # ---------- 테마 ----------
 
 def _mix(hex_color, other, t):
@@ -304,6 +322,8 @@ class Pip:
             # 미니 기본 높이: 작업 표시줄 높이(48), agent가 둘이면 행 수만큼 늘림
             h = self.px(48 + 36 * (agents - 1)) if mini else self.px(130 + 50 * (agents - 1))
             rect = [x, y, self.px(300), h]
+        if not initial:  # 모드 전환: 그 모드에 저장된 위치로 튀지 않고 지금 자리에서 크기만 바꾼다
+            rect = _keep_in_work_area([self.root.winfo_x(), self.root.winfo_y(), rect[2], rect[3]])
         self.root.geometry(f"{rect[2]}x{rect[3]}+{rect[0]}+{rect[1]}")
         if self._last_update:
             self.update(*self._last_update)
