@@ -110,16 +110,15 @@ class _MonitorInfo(ctypes.Structure):
 
 
 def _keep_in_work_area(rect):
-    """크기가 바뀐 창이 작업 영역(작업 표시줄 제외) 밖으로 나가면 안쪽으로 민다."""
+    """크기가 바뀐 창이 작업 영역(작업 표시줄 제외) 밖으로 나가면 안쪽으로 민다. Win32 호출이 실패하면 그대로 둔다."""
     x, y, w, h = rect
     r = wintypes.RECT(x, y, x + w, y + h)
     mi = _MonitorInfo(cbSize=ctypes.sizeof(_MonitorInfo))
-    user32.MonitorFromRect.restype = wintypes.HMONITOR
+    # restype을 바꾸지 않는다: 기본 c_int로 받아 그대로 돌려주면 핸들 값이 32비트를 넘어도 안전하다 (_on_screen과 같은 방식)
     if not user32.GetMonitorInfoW(user32.MonitorFromRect(ctypes.byref(r), 2), ctypes.byref(mi)):  # NEAREST
         return rect
     wa = mi.rcWork
-    return [min(max(x, wa.left), max(wa.left, wa.right - w)),
-            min(max(y, wa.top), max(wa.top, wa.bottom - h)), w, h]
+    return uc.clamp_to_work_area(rect, (wa.left, wa.top, wa.right, wa.bottom))
 
 
 # ---------- 테마 ----------

@@ -359,3 +359,10 @@ class ClaudeFetcher:
             self.ok_at = self._clock()
         self.prev = result
         return result
+
+
+def clamp_to_work_area(rect, work):
+    """크기가 바뀐 창 rect=[x,y,w,h]가 작업 영역 work=(left,top,right,bottom) 밖으로 나가면 안쪽으로 민다. 작업 영역보다 크면 왼쪽 위에 붙인다."""
+    x, y, w, h = rect
+    left, top, right, bottom = work
+    return [min(max(x, left), max(left, right - w)), min(max(y, top), max(top, bottom - h)), w, h]

@@ -186,3 +186,13 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print("ok", name)
+
+
+def test_clamp_to_work_area():
+    wa = (0, 0, 1920, 1040)  # 작업 표시줄(40px)을 뺀 영역
+    assert uc.clamp_to_work_area([100, 100, 300, 130], wa) == [100, 100, 300, 130]  # 안쪽이면 그대로
+    assert uc.clamp_to_work_area([100, 992, 300, 130], wa) == [100, 910, 300, 130]  # 아래로 넘치면 위로
+    assert uc.clamp_to_work_area([1800, 100, 300, 130], wa) == [1620, 100, 300, 130]  # 오른쪽으로 넘치면 왼쪽으로
+    assert uc.clamp_to_work_area([-50, -20, 300, 130], wa) == [0, 0, 300, 130]  # 왼쪽·위로 넘치면 안쪽으로
+    assert uc.clamp_to_work_area([100, 100, 3000, 2000], wa) == [0, 0, 3000, 2000]  # 영역보다 크면 왼쪽 위에 붙임
+    assert uc.clamp_to_work_area([-1800, 10, 300, 130], (-1920, 0, 0, 1040)) == [-1800, 10, 300, 130]  # 왼쪽 모니터(음수 좌표)
