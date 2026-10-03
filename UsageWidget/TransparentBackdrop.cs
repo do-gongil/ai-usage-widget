@@ -10,6 +10,8 @@ namespace UsageWidget;
 sealed class TransparentBackdrop : SystemBackdrop
 {
     static Windows.UI.Composition.Compositor? _compositor;
+    readonly IntPtr _hwnd;
+    public TransparentBackdrop(IntPtr hwnd) => _hwnd = hwnd;
 
     protected override void OnTargetConnected(ICompositionSupportsSystemBackdrop target, XamlRoot xamlRoot)
     {
@@ -17,12 +19,30 @@ sealed class TransparentBackdrop : SystemBackdrop
         EnsureDispatcherQueue(); // 시스템 Compositor는 Windows.System.DispatcherQueue가 있는 스레드에서만 만들 수 있다
         _compositor ??= new Windows.UI.Composition.Compositor();
         target.SystemBackdrop = _compositor.CreateColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+        // 이게 없으면 창 표면이 불투명이라 알파 배경이 검정 위에 섞여 색만 어두워진다.
+        // 빈 영역으로 blur-behind를 켜면 DWM이 창을 per-pixel 알파로 합성한다.
+        SetBlurBehind(true);
     }
 
     protected override void OnTargetDisconnected(ICompositionSupportsSystemBackdrop target)
     {
         base.OnTargetDisconnected(target);
         target.SystemBackdrop = null;
+        SetBlurBehind(false);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct DWM_BLURBEHIND { public uint dwFlags; public int fEnable; public IntPtr hRgnBlur; public int fTransitionOnMaximized; }
+    [DllImport("dwmapi.dll")] static extern int DwmEnableBlurBehindWindow(IntPtr hwnd, ref DWM_BLURBEHIND bb);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateRectRgn(int l, int t, int r, int b);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr h);
+
+    void SetBlurBehind(bool on)
+    {
+        var rgn = CreateRectRgn(-2, -2, -1, -1); // 화면 밖 1px: 실제 블러 없이 투명 합성만 켠다
+        var bb = new DWM_BLURBEHIND { dwFlags = 0x1 | 0x2, fEnable = on ? 1 : 0, hRgnBlur = rgn }; // DWM_BB_ENABLE | DWM_BB_BLURREGION
+        DwmEnableBlurBehindWindow(_hwnd, ref bb);
+        DeleteObject(rgn);
     }
 
     [StructLayout(LayoutKind.Sequential)]

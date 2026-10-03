@@ -317,7 +317,7 @@ public sealed partial class MainWindow : Window
             Root.Background = null;
             return;
         }
-        if (SystemBackdrop is not TransparentBackdrop) SystemBackdrop = new TransparentBackdrop();
+        if (SystemBackdrop is not TransparentBackdrop) SystemBackdrop = new TransparentBackdrop(_hwnd);
         // 기본 색은 Mica 대신 시스템 테마의 창 배경색
         var c = Brush(hex ?? (Root.ActualTheme == ElementTheme.Dark ? "#202020" : "#F3F3F3")).Color;
         c.A = (byte)(_cfg.PipOpacity * 255 / 100);

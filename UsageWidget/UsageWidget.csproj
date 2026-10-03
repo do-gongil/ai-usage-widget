@@ -4,7 +4,7 @@
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>UsageWidget</RootNamespace>
-    <Version>1.0.4</Version> <!-- Package.appxmanifest Identity Version도 같이 올린다 -->
+    <Version>1.0.5</Version> <!-- Package.appxmanifest Identity Version도 같이 올린다 -->
     <!-- exe 버전 정보: 비어 있으면 출처 불명 파일로 보이기 쉽다 -->
     <Authors>do-gongil</Authors>
     <Company>do-gongil</Company>
