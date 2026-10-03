@@ -30,7 +30,6 @@ public sealed partial class MainWindow : Window
         _cfg = cfg;
         InitializeComponent();
         Title = "Usage";
-        SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragArea);
         var icon = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"); // 작업 표시줄·Alt+Tab 아이콘
@@ -291,7 +290,6 @@ public sealed partial class MainWindow : Window
     void ApplyColor()
     {
         var hex = _cfg.PipColor;
-        Root.Background = hex == null ? null : Brush(hex);
         var theme = hex == null ? ElementTheme.Default : IsDark(hex) ? ElementTheme.Dark : ElementTheme.Light;
         Root.RequestedTheme = theme;
         // OS가 그리는 닫기 버튼: 배경은 투명하게, 글자색은 창 색에 맞춘다
@@ -303,25 +301,27 @@ public sealed partial class MainWindow : Window
             ElementTheme.Light => Colors.Black,
             _ => null,
         };
+        ApplyBackground();
     }
 
-    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-    [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-    [DllImport("user32.dll")] static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
-    const int GWL_EXSTYLE = -20, WS_EX_LAYERED = 0x80000;
-    const uint LWA_ALPHA = 0x2;
+    void ApplyOpacity() => ApplyBackground();
 
-    /// 창 전체 투명도: layered 창 알파. 100%면 layered를 해제해 일반 창으로 되돌린다.
-    void ApplyOpacity()
+    /// 투명도는 배경에만: 투명 backdrop 위에 알파를 준 배경색을 깐다 (글씨·막대는 불투명 유지).
+    /// 기본 색 + 100%일 때만 Mica.
+    void ApplyBackground()
     {
-        var ex = GetWindowLong(_hwnd, GWL_EXSTYLE);
-        if (_cfg.PipOpacity >= 100)
+        var hex = _cfg.PipColor;
+        if (hex == null && _cfg.PipOpacity >= 100)
         {
-            SetWindowLong(_hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+            if (SystemBackdrop is not MicaBackdrop) SystemBackdrop = new MicaBackdrop();
+            Root.Background = null;
             return;
         }
-        SetWindowLong(_hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
-        SetLayeredWindowAttributes(_hwnd, 0, (byte)(_cfg.PipOpacity * 255 / 100), LWA_ALPHA);
+        if (SystemBackdrop is not TransparentBackdrop) SystemBackdrop = new TransparentBackdrop();
+        // 기본 색은 Mica 대신 시스템 테마의 창 배경색
+        var c = Brush(hex ?? (Root.ActualTheme == ElementTheme.Dark ? "#202020" : "#F3F3F3")).Color;
+        c.A = (byte)(_cfg.PipOpacity * 255 / 100);
+        Root.Background = new SolidColorBrush(c);
     }
 
     static SolidColorBrush Brush(string hex) => new(Color.FromArgb(0xff,
