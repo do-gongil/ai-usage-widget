@@ -220,23 +220,28 @@ public sealed partial class MainWindow : Window
         ScheduleSave(); // 드래그 중 매 틱마다 파일을 쓰지 않게
     }
 
+    static Button Swatch(string name, string? hex, bool selected, string? glyph)
+    {
+        var b = new Button
+        {
+            Width = 26, Height = 26, Padding = new Thickness(0), CornerRadius = new CornerRadius(13),
+            Background = hex == null ? new SolidColorBrush(Colors.Transparent) : Brush(hex),
+            BorderThickness = new Thickness(selected ? 2.5 : 1),
+            BorderBrush = selected ? (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"] : Brush("#8a8a8a"),
+            Content = glyph == null ? null : new FontIcon { Glyph = glyph, FontSize = 11 },
+        };
+        ToolTipService.SetToolTip(b, name);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
+        return b;
+    }
+
     void BuildSwatches()
     {
         Swatches.Children.Clear();
         foreach (var (name, hex) in Palette)
         {
-            var selected = hex == _cfg.PipColor;
-            var b = new Button
-            {
-                Width = 26, Height = 26, Padding = new Thickness(0), CornerRadius = new CornerRadius(13),
-                Background = hex == null ? new SolidColorBrush(Colors.Transparent) : Brush(hex),
-                BorderThickness = new Thickness(selected ? 2.5 : 1),
-                BorderBrush = selected ? (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"] : Brush("#8a8a8a"),
-                // 기본은 "배경 없음" 표시
-                Content = hex == null ? new FontIcon { Glyph = "\uE894", FontSize = 11 } : null,
-            };
-            ToolTipService.SetToolTip(b, name);
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
+            // 기본은 "배경 없음" 표시
+            var b = Swatch(name, hex, hex == _cfg.PipColor, hex == null ? "" : null);
             b.Click += (_, _) =>
             {
                 _cfg.PipColor = hex;
@@ -246,6 +251,35 @@ public sealed partial class MainWindow : Window
             };
             Swatches.Children.Add(b);
         }
+        Swatches.Children.Add(CustomSwatch());
+    }
+
+    /// 사용자 지정 색: WinUI ColorPicker (색 영역 + RGB/hex 입력). 고른 색은 바로 창에 적용된다.
+    Button CustomSwatch()
+    {
+        var custom = _cfg.PipColor != null && Palette.All(p => p.Hex != _cfg.PipColor);
+        var picker = new ColorPicker
+        {
+            ColorSpectrumShape = ColorSpectrumShape.Box,
+            IsAlphaEnabled = false, // 투명도는 별도 슬라이더
+            IsMoreButtonVisible = false,
+            IsColorChannelTextInputVisible = true,
+            IsHexInputVisible = true,
+            Color = Brush(_cfg.PipColor ?? "#FFFFFF").Color,
+        };
+        picker.ColorChanged += (_, e) =>
+        {
+            _cfg.PipColor = $"#{e.NewColor.R:X2}{e.NewColor.G:X2}{e.NewColor.B:X2}";
+            ApplyColor();
+            ScheduleSave(); // 드래그 중 매번 쓰지 않게
+        };
+        var flyout = new Flyout { Content = picker, ShouldConstrainToRootBounds = false };
+        // 열려 있는 동안 다시 만들면 플라이아웃이 닫히므로, 선택 테두리는 닫힐 때 갱신
+        flyout.Closed += (_, _) => BuildSwatches();
+        var b = Swatch(custom ? $"사용자 지정 ({_cfg.PipColor})" : "사용자 지정",
+                       custom ? _cfg.PipColor : null, custom, custom ? null : "");
+        b.Flyout = flyout;
+        return b;
     }
 
     static bool IsDark(string hex)
