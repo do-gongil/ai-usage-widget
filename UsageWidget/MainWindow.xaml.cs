@@ -16,6 +16,7 @@ public sealed partial class MainWindow : Window
     readonly OverlappedPresenter _presenter;
     readonly IntPtr _hwnd;
     bool _ready; // 초기값을 컨트롤에 넣는 동안 이벤트 핸들러가 설정을 저장하지 않게
+    bool _translucent; // 투명 모드(배경 알파)를 한 번 켜면 실행이 끝날 때까지 유지 (Mica로 되돌리는 경로가 없다)
     public event Action? RefreshRequested;
 
     // 팔레트: null = 기본(Mica 배경, 시스템 테마)
@@ -29,6 +30,9 @@ public sealed partial class MainWindow : Window
     {
         _cfg = cfg;
         InitializeComponent();
+        // 기본 색 + 반투명일 때 배경색은 현재 테마를 보고 정하므로, 처음 그려질 때와 OS 테마가 바뀔 때 다시 계산한다
+        Root.Loaded += (_, _) => ApplyBackground();
+        Root.ActualThemeChanged += (_, _) => ApplyBackground();
         Title = "Usage";
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragArea);
@@ -85,8 +89,10 @@ public sealed partial class MainWindow : Window
     public void SaveRect()
     {
         if (!AppWindow.IsVisible) return;
-        var (p, s) = (AppWindow.Position, AppWindow.Size);
-        int[] rect = [p.X, p.Y, s.Width, s.Height];
+        // 모드를 바꾼 직후 150ms 동안은 창 크기가 아직 정해지지 않았으므로, 적용하려던 값을 저장한다
+        var r = _resizeTimer?.IsRunning == true ? _pendingRect
+            : new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
+        int[] rect = [r.X, r.Y, r.Width, r.Height];
         if (_cfg.PipMini) _cfg.PipMiniRect = rect;
         else _cfg.PipRect = rect;
         _cfg.Save();
@@ -136,19 +142,24 @@ public sealed partial class MainWindow : Window
         MiniButton.Margin = new Thickness(0, 0, Math.Max(0, inset - Root.Padding.Right), 0);
     }
 
-    /// 지금 위치에서 크기만 바꾸되, 커진 창이 작업 영역(작업 표시줄 제외) 밖으로 나가지 않게 안쪽으로 민다
-    static RectInt32 KeepInWorkArea(RectInt32 r)
+    /// 지금 자리에서 크기만 바꾼다. 작업 표시줄 쪽 가장자리에 붙어 있던 창은 그 가장자리를 유지해서 왕복해도 제자리로 돌아오고,
+    /// 그래도 작업 영역(작업 표시줄 제외) 밖으로 나가면 안쪽으로 민다. 작업 영역보다 큰 크기는 줄인다.
+    /// edgeTol: 가장자리에 붙은 것으로 볼 오차(보이지 않는 크기 조절 테두리 몫)
+    static RectInt32 Resized(RectInt32 old, int w, int h, int edgeTol)
     {
-        var wa = DisplayArea.GetFromRect(r, DisplayAreaFallback.Nearest).WorkArea;
-        return new RectInt32(
-            Math.Clamp(r.X, wa.X, Math.Max(wa.X, wa.X + wa.Width - r.Width)),
-            Math.Clamp(r.Y, wa.Y, Math.Max(wa.Y, wa.Y + wa.Height - r.Height)),
-            r.Width, r.Height);
+        var wa = DisplayArea.GetFromRect(old, DisplayAreaFallback.Nearest).WorkArea; // 새 크기가 아니라 지금 창이 있는 모니터
+        w = Math.Min(w, wa.Width);
+        h = Math.Min(h, wa.Height);
+        var (x, y) = (old.X, old.Y);
+        if (Math.Abs(old.X + old.Width - (wa.X + wa.Width)) <= edgeTol) x = old.X + old.Width - w;
+        if (Math.Abs(old.Y + old.Height - (wa.Y + wa.Height)) <= edgeTol) y = old.Y + old.Height - h;
+        return new RectInt32(Math.Clamp(x, wa.X, wa.X + wa.Width - w), Math.Clamp(y, wa.Y, wa.Y + wa.Height - h), w, h);
     }
 
     /// keepPosition: 모드 전환 시 그 모드에 저장된 위치로 튀지 않고 지금 자리에 둔다 (크기만 모드별로 기억)
     void ApplyMode(bool keepPosition = false)
     {
+        var (oldPos, oldSize) = (AppWindow.Position, AppWindow.Size); // 표시줄·테두리를 바꾸기 전의 자리
         var mini = _cfg.PipMini;
         Header.Visibility = mini ? Visibility.Collapsed : Visibility.Visible;
         RestoreButton.Visibility = mini ? Visibility.Visible : Visibility.Collapsed;
@@ -160,11 +171,12 @@ public sealed partial class MainWindow : Window
         SetTitleBar(mini ? Rows : DragArea);
 
         var r = mini ? _cfg.PipMiniRect : _cfg.PipRect;
-        var p = AppWindow.Position;
-        // 처음 전환할 때: 지금 위치에서 작업 표시줄 높이(48)로 / 일반 창 기본 크기로
-        var rect = r is { Length: 4 } && IsOnScreen(r) ? new RectInt32(r[0], r[1], r[2], r[3])
-            : mini ? new RectInt32(p.X, p.Y, Px(300), Px(48)) : new RectInt32(p.X, p.Y, Px(300), Px(130));
-        if (keepPosition) rect = KeepInWorkArea(new RectInt32(p.X, p.Y, rect.Width, rect.Height));
+        // 전환할 때는 저장된 위치를 쓰지 않고 크기만 가져오므로, 옛 위치가 화면 밖이어도 크기는 쓴다
+        var saved = r is { Length: 4 } && (keepPosition || IsOnScreen(r));
+        // 처음 전환할 때: 작업 표시줄 높이(48)로 / 일반 창 기본 크기로
+        var (w, h) = saved ? (r![2], r[3]) : mini ? (Px(300), Px(48)) : (Px(300), Px(130));
+        var rect = keepPosition ? Resized(new RectInt32(oldPos.X, oldPos.Y, oldSize.Width, oldSize.Height), w, h, Px(16))
+            : saved ? new RectInt32(r![0], r[1], w, h) : new RectInt32(oldPos.X, oldPos.Y, w, h);
         // 제목 표시줄 제거/복원이 뒤늦게 창 크기를 다시 계산하므로, 잠시 뒤 한 번 더 적용한다
         // ponytail: 150ms는 경험값. 느린 PC에서 크기가 어긋나면 늘릴 것
         AppWindow.MoveAndResize(rect);
@@ -193,6 +205,8 @@ public sealed partial class MainWindow : Window
         {
             // 네이티브 콜백 안에서 UI를 바꾸다 예외가 나면 프로세스가 즉시 종료되므로, 메시지 처리 후로 미룬다
             if (msg == WM_HOTKEY && w == 1) { DispatcherQueue.TryEnqueue(ToggleMini); return IntPtr.Zero; }
+            // 투명 모드에서는 WinUI가 칠하는 흰색/검정 불투명 바탕면 대신 검정(알파 0)으로 칠해야 창 뒤가 비친다
+            if (msg == WindowTransparency.WM_ERASEBKGND && _translucent) { WindowTransparency.EraseBlack(h, w); return 1; }
             return DefSubclassProc(h, msg, w, l);
         };
         SetWindowSubclass(_hwnd, _subclass, 1, 0);
@@ -269,12 +283,11 @@ public sealed partial class MainWindow : Window
         picker.ColorChanged += (_, e) =>
         {
             _cfg.PipColor = $"#{e.NewColor.R:X2}{e.NewColor.G:X2}{e.NewColor.B:X2}";
-            ApplyColor();
-            ScheduleSave(); // 드래그 중 매번 쓰지 않게
+            ApplyColor(); // 저장은 닫을 때 한 번: hex 상자는 글자마다 색이 바뀌어 입력 중간값이 저장되지 않게
         };
         var flyout = new Flyout { Content = picker, ShouldConstrainToRootBounds = false };
         // 열려 있는 동안 다시 만들면 플라이아웃이 닫히므로, 선택 테두리는 닫힐 때 갱신
-        flyout.Closed += (_, _) => BuildSwatches();
+        flyout.Closed += (_, _) => { _cfg.Save(); BuildSwatches(); };
         var b = Swatch(custom ? $"사용자 지정 ({_cfg.PipColor})" : "사용자 지정",
                        custom ? _cfg.PipColor : null, custom, custom ? null : "");
         b.Flyout = flyout;
@@ -307,17 +320,22 @@ public sealed partial class MainWindow : Window
     void ApplyOpacity() => ApplyBackground();
 
     /// 투명도는 배경에만: 투명 backdrop 위에 알파를 준 배경색을 깐다 (글씨·막대는 불투명 유지).
-    /// 기본 색 + 100%일 때만 Mica.
+    /// 시작할 때 100%면 1.0.3과 같은 Mica(색은 불투명 배경). 투명도를 낮추는 순간 투명 모드로 넘어가 이번 실행 동안 유지한다.
     void ApplyBackground()
     {
         var hex = _cfg.PipColor;
-        if (hex == null && _cfg.PipOpacity >= 100)
+        if (!_translucent && _cfg.PipOpacity >= 100)
         {
             if (SystemBackdrop is not MicaBackdrop) SystemBackdrop = new MicaBackdrop();
-            Root.Background = null;
+            Root.Background = hex == null ? null : Brush(hex);
             return;
         }
-        if (SystemBackdrop is not TransparentBackdrop) SystemBackdrop = new TransparentBackdrop(_hwnd);
+        if (!_translucent)
+        {
+            _translucent = true;
+            SystemBackdrop = new TransparentBackdrop();
+            WindowTransparency.Enable(_hwnd);
+        }
         // 기본 색은 Mica 대신 시스템 테마의 창 배경색
         var c = Brush(hex ?? (Root.ActualTheme == ElementTheme.Dark ? "#202020" : "#F3F3F3")).Color;
         c.A = (byte)(_cfg.PipOpacity * 255 / 100);
