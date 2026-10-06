@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>UsageWidget</RootNamespace>
+    <Version>1.0.6</Version> <!-- Package.appxmanifest Identity Version도 같이 올린다 -->
+    <!-- exe 버전 정보: 비어 있으면 출처 불명 파일로 보이기 쉽다 -->
+    <Authors>do-gongil</Authors>
+    <Company>do-gongil</Company>
+    <Product>Session Usage Widget</Product>
+    <AssemblyTitle>Session Usage Widget</AssemblyTitle> <!-- 파일 속성의 "파일 설명" -->
+    <Description>Claude Code / Codex usage widget (unofficial)</Description>
+    <Copyright>Copyright (c) 2026 do-gongil</Copyright>
+    <!-- 배포본에 .pdb(로컬 빌드 경로 포함)를 넣지 않는다 -->
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+    <AssemblyName>UsageWidget</AssemblyName>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- MSIX(Store) 배포: Package.appxmanifest 사용. 서명은 Store가 하므로 로컬 서명 끔 -->
+    <WindowsPackageType>MSIX</WindowsPackageType>
+    <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
+    <AppxBundle>Never</AppxBundle>
+    <!-- VS 없이 dotnet CLI로 빌드: PRI/MSIX 빌드 작업을 WindowsAppSDK NuGet에서 가져온다 -->
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 창 아이콘(AppWindow.SetIcon)은 실행 폴더의 파일을 읽는다 -->
+    <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250205002" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1742" />
+    <PackageReference Include="H.NotifyIcon.WinUI" Version="2.2.0" />
+  </ItemGroup>
+</Project>

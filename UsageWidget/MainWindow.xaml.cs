@@ -1,0 +1,402 @@
+using System.Runtime.InteropServices;
+using Microsoft.UI;
+using Microsoft.UI.Windowing;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Windows.Graphics;
+using Windows.UI;
+
+namespace UsageWidget;
+
+/// PiP 창: 항상 위(설정 가능) + 크기 조절. 닫기 = 숨기기.
+public sealed partial class MainWindow : Window
+{
+    readonly Config _cfg;
+    readonly OverlappedPresenter _presenter;
+    readonly IntPtr _hwnd;
+    bool _ready; // 초기값을 컨트롤에 넣는 동안 이벤트 핸들러가 설정을 저장하지 않게
+    bool _translucent; // 투명 모드(배경 알파)를 한 번 켜면 실행이 끝날 때까지 유지 (Mica로 되돌리는 경로가 없다)
+    public event Action? RefreshRequested;
+
+    // 팔레트: null = 기본(Mica 배경, 시스템 테마)
+    static readonly (string Name, string? Hex)[] Palette =
+    [
+        ("기본", null), ("노랑", "#FFF4B8"), ("분홍", "#FFD9EC"), ("하늘", "#D6ECFF"),
+        ("연두", "#DDF5D5"), ("보라", "#E8DCFF"), ("어두움", "#202428"),
+    ];
+
+    public MainWindow(Config cfg)
+    {
+        _cfg = cfg;
+        InitializeComponent();
+        // 기본 색 + 반투명일 때 배경색은 현재 테마를 보고 정하므로, 처음 그려질 때와 OS 테마가 바뀔 때 다시 계산한다
+        Root.Loaded += (_, _) => ApplyBackground();
+        Root.ActualThemeChanged += (_, _) => ApplyBackground();
+        Title = "Usage";
+        ExtendsContentIntoTitleBar = true;
+        SetTitleBar(DragArea);
+        var icon = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"); // 작업 표시줄·Alt+Tab 아이콘
+        if (File.Exists(icon)) AppWindow.SetIcon(icon); // 파일이 없으면 기본 아이콘 (시작 시 예외로 죽지 않게)
+
+        // CompactOverlay는 크기 조절 폭이 OS 제한에 묶여 있어, 항상 위 + 크기 조절 가능한 일반 창으로 PiP를 만든다
+        _presenter = OverlappedPresenter.Create();
+        _presenter.IsAlwaysOnTop = cfg.PipTopMost;
+        _presenter.IsResizable = true;
+        _presenter.IsMaximizable = false;
+        _presenter.IsMinimizable = false;
+        AppWindow.SetPresenter(_presenter);
+        _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        RegisterToggleHotkey(); // 창 서브클래스는 첫 MoveAndResize·ApplyBackground보다 먼저: 투명 모드의 바탕면 지우기를 가로채야 한다
+
+        TopMostSwitch.IsOn = cfg.PipTopMost;
+        OpacitySlider.Value = cfg.PipOpacity;
+        BuildSwatches();
+        ApplyColor();
+        ApplyOpacity();
+        _ready = true;
+        ApplyMode();
+        // 닫기(X) 영역 폭은 창이 그려진 뒤에야 확정되므로 크기가 바뀔 때마다 맞춘다
+        Root.SizeChanged += (_, _) => AlignMiniButton();
+        // 옮기거나 크기를 바꾸면 곧바로 저장: 재부팅·로그오프로 꺼져도 위치가 유지되게
+        AppWindow.Changed += (_, a) => { if (a.DidPositionChange || a.DidSizeChange) ScheduleSave(); };
+
+        AppWindow.Closing += (_, e) => { e.Cancel = true; SetVisible(false); };
+    }
+
+    // 모니터 구성이 바뀌어 저장된 위치가 화면 밖이면 기본 위치로
+    static bool IsOnScreen(int[] r) =>
+        DisplayArea.GetFromRect(new RectInt32(r[0], r[1], r[2], r[3]), DisplayAreaFallback.None) != null;
+
+    public bool IsShown => AppWindow.IsVisible;
+
+    public void SetVisible(bool visible)
+    {
+        if (visible)
+        {
+            AppWindow.Show();
+            Activate();
+        }
+        else
+        {
+            SaveRect();
+            AppWindow.Hide();
+        }
+        _cfg.PipVisible = visible;
+        _cfg.Save();
+    }
+
+    public void SaveRect()
+    {
+        if (!AppWindow.IsVisible) return;
+        // 모드를 바꾼 직후 150ms 동안은 창 크기가 아직 정해지지 않았으므로, 적용하려던 값을 저장한다
+        var r = _resizeTimer?.IsRunning == true ? _pendingRect
+            : new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
+        int[] rect = [r.X, r.Y, r.Width, r.Height];
+        if (_cfg.PipMini) _cfg.PipMiniRect = rect;
+        else _cfg.PipRect = rect;
+        _cfg.Save();
+    }
+
+    Microsoft.UI.Dispatching.DispatcherQueueTimer? _saveTimer;
+
+    /// 창 이동·크기 조절·투명도 슬라이더처럼 연달아 바뀌는 값은 마지막 변경 0.5초 뒤 한 번만 저장
+    void ScheduleSave()
+    {
+        if (_saveTimer == null)
+        {
+            _saveTimer = DispatcherQueue.CreateTimer();
+            _saveTimer.Interval = TimeSpan.FromMilliseconds(500);
+            _saveTimer.IsRepeating = false;
+            _saveTimer.Tick += (_, _) => { if (IsShown) SaveRect(); else _cfg.Save(); };
+        }
+        _saveTimer.Stop();
+        _saveTimer.Start();
+    }
+
+    // ---------- 미니 모드 ----------
+
+    void Mini_Click(object sender, RoutedEventArgs e) => ToggleMini();
+
+    /// 일반 창 ↔ 미니 창(상단 행 없이 작업 표시줄 높이). 숨겨져 있었으면 함께 보이게 한다.
+    public void ToggleMini()
+    {
+        SaveRect();
+        _cfg.PipMini = !_cfg.PipMini;
+        _cfg.Save();
+        ApplyMode(keepPosition: true);
+        if (!IsShown) SetVisible(true);
+    }
+
+    [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
+    int Px(double dip) => (int)Math.Round(dip * GetDpiForWindow(_hwnd) / 96.0);
+
+    Microsoft.UI.Dispatching.DispatcherQueueTimer? _resizeTimer;
+    RectInt32 _pendingRect;
+    void ResizeTick(Microsoft.UI.Dispatching.DispatcherQueueTimer t, object o) => AppWindow.MoveAndResize(_pendingRect);
+
+    /// 미니 모드 버튼을 X 바로 왼쪽에: 오른쪽 여백 = X 버튼 영역 폭 - Root 오른쪽 패딩
+    void AlignMiniButton()
+    {
+        var inset = AppWindow.TitleBar.RightInset * 96.0 / GetDpiForWindow(_hwnd);
+        MiniButton.Margin = new Thickness(0, 0, Math.Max(0, inset - Root.Padding.Right), 0);
+    }
+
+    /// 지금 자리에서 크기만 바꾼다. 작업 표시줄 쪽 가장자리에 붙어 있던 창은 그 가장자리를 유지해서 왕복해도 제자리로 돌아오고,
+    /// 그래도 작업 영역(작업 표시줄 제외) 밖으로 나가면 안쪽으로 민다. 작업 영역보다 큰 크기는 줄인다.
+    /// edgeTol: 가장자리에 붙은 것으로 볼 오차(보이지 않는 크기 조절 테두리 몫)
+    static RectInt32 Resized(RectInt32 old, int w, int h, int edgeTol)
+    {
+        var wa = DisplayArea.GetFromRect(old, DisplayAreaFallback.Nearest).WorkArea; // 새 크기가 아니라 지금 창이 있는 모니터
+        w = Math.Min(w, wa.Width);
+        h = Math.Min(h, wa.Height);
+        var (x, y) = (old.X, old.Y);
+        if (Math.Abs(old.X + old.Width - (wa.X + wa.Width)) <= edgeTol) x = old.X + old.Width - w;
+        if (Math.Abs(old.Y + old.Height - (wa.Y + wa.Height)) <= edgeTol) y = old.Y + old.Height - h;
+        return new RectInt32(Math.Clamp(x, wa.X, wa.X + wa.Width - w), Math.Clamp(y, wa.Y, wa.Y + wa.Height - h), w, h);
+    }
+
+    /// keepPosition: 모드 전환 시 그 모드에 저장된 위치로 튀지 않고 지금 자리에 둔다 (크기만 모드별로 기억)
+    void ApplyMode(bool keepPosition = false)
+    {
+        var (oldPos, oldSize) = (AppWindow.Position, AppWindow.Size); // 표시줄·테두리를 바꾸기 전의 자리
+        var mini = _cfg.PipMini;
+        Header.Visibility = mini ? Visibility.Collapsed : Visibility.Visible;
+        RestoreButton.Visibility = mini ? Visibility.Visible : Visibility.Collapsed;
+        Root.Padding = mini ? new Thickness(10, 3, 4, 3) : new Thickness(12, 8, 12, 10);
+        Rows.Spacing = mini ? 0 : 6;
+        Rows.Margin = mini ? new Thickness(0) : new Thickness(0, 6, 0, 0);
+        // 미니: 제목 표시줄(닫기 버튼)을 없애고 막대 영역 전체를 잡아 끌 수 있게
+        _presenter.SetBorderAndTitleBar(true, !mini);
+        SetTitleBar(mini ? Rows : DragArea);
+
+        var r = mini ? _cfg.PipMiniRect : _cfg.PipRect;
+        // 전환할 때는 저장된 위치를 쓰지 않고 크기만 가져오므로, 옛 위치가 화면 밖이어도 크기는 쓴다
+        var saved = r is { Length: 4 } && (keepPosition || IsOnScreen(r));
+        // 처음 전환할 때: 작업 표시줄 높이(48)로 / 일반 창 기본 크기로
+        var (w, h) = saved ? (r![2], r[3]) : mini ? (Px(300), Px(48)) : (Px(300), Px(130));
+        var rect = keepPosition ? Resized(new RectInt32(oldPos.X, oldPos.Y, oldSize.Width, oldSize.Height), w, h, Px(16))
+            : saved ? new RectInt32(r![0], r[1], w, h) : new RectInt32(oldPos.X, oldPos.Y, w, h);
+        // 제목 표시줄 제거/복원이 뒤늦게 창 크기를 다시 계산하므로, 잠시 뒤 한 번 더 적용한다
+        // ponytail: 150ms는 경험값. 느린 PC에서 크기가 어긋나면 늘릴 것
+        AppWindow.MoveAndResize(rect);
+        _resizeTimer ??= DispatcherQueue.CreateTimer();
+        _resizeTimer.Stop();
+        _resizeTimer.Interval = TimeSpan.FromMilliseconds(150);
+        _resizeTimer.IsRepeating = false;
+        _pendingRect = rect;
+        _resizeTimer.Tick -= ResizeTick;
+        _resizeTimer.Tick += ResizeTick;
+        _resizeTimer.Start();
+        if (_lastUpdate is var (results, last, at)) Update(results, last, at);
+    }
+
+    // 전역 단축키 Ctrl+Alt+U: 창에 포커스가 없어도 동작해야 하므로 RegisterHotKey + 창 서브클래싱
+    delegate IntPtr SubclassProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, UIntPtr id, UIntPtr data);
+    [DllImport("comctl32.dll")] static extern bool SetWindowSubclass(IntPtr hWnd, SubclassProc proc, UIntPtr id, UIntPtr data);
+    [DllImport("comctl32.dll")] static extern IntPtr DefSubclassProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr hWnd, int id, uint mods, uint vk);
+    const uint WM_HOTKEY = 0x0312, MOD_ALT = 0x1, MOD_CONTROL = 0x2, MOD_NOREPEAT = 0x4000, VK_U = 0x55;
+    SubclassProc? _subclass; // GC에 수거되지 않게 필드로 붙잡아 둔다
+
+    void RegisterToggleHotkey()
+    {
+        _subclass = (h, msg, w, l, _, _) =>
+        {
+            // 네이티브 콜백 안에서 UI를 바꾸다 예외가 나면 프로세스가 즉시 종료되므로, 메시지 처리 후로 미룬다
+            if (msg == WM_HOTKEY && w == 1) { DispatcherQueue.TryEnqueue(ToggleMini); return IntPtr.Zero; }
+            // 투명 모드에서는 WinUI가 칠하는 흰색/검정 불투명 바탕면 대신 검정(알파 0)으로 칠해야 창 뒤가 비친다
+            if (msg == WindowTransparency.WM_ERASEBKGND && _translucent) { WindowTransparency.EraseBlack(h, w); return 1; }
+            return DefSubclassProc(h, msg, w, l);
+        };
+        SetWindowSubclass(_hwnd, _subclass, 1, 0);
+        // ponytail: 다른 앱이 이미 쓰는 조합이면 등록 실패 → 버튼으로만 전환. 필요해지면 설정에서 키 변경 추가
+        RegisterHotKey(_hwnd, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_U);
+    }
+
+    void Refresh_Click(object sender, RoutedEventArgs e) => RefreshRequested?.Invoke();
+
+    // ---------- 설정 팔레트 ----------
+
+    void TopMost_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_ready) return;
+        _presenter.IsAlwaysOnTop = _cfg.PipTopMost = TopMostSwitch.IsOn;
+        _cfg.Save();
+    }
+
+    void Opacity_Changed(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (!_ready) return;
+        _cfg.PipOpacity = (int)e.NewValue;
+        ApplyOpacity();
+        ScheduleSave(); // 드래그 중 매 틱마다 파일을 쓰지 않게
+    }
+
+    static Button Swatch(string name, string? hex, bool selected, string? glyph)
+    {
+        var b = new Button
+        {
+            Width = 26, Height = 26, Padding = new Thickness(0), CornerRadius = new CornerRadius(13),
+            Background = hex == null ? new SolidColorBrush(Colors.Transparent) : Brush(hex),
+            BorderThickness = new Thickness(selected ? 2.5 : 1),
+            BorderBrush = selected ? (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"] : Brush("#8a8a8a"),
+            Content = glyph == null ? null : new FontIcon { Glyph = glyph, FontSize = 11 },
+        };
+        ToolTipService.SetToolTip(b, name);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, name);
+        return b;
+    }
+
+    void BuildSwatches()
+    {
+        Swatches.Children.Clear();
+        foreach (var (name, hex) in Palette)
+        {
+            // 기본은 "배경 없음" 표시
+            var b = Swatch(name, hex, hex == _cfg.PipColor, hex == null ? "" : null);
+            b.Click += (_, _) =>
+            {
+                _cfg.PipColor = hex;
+                _cfg.Save();
+                ApplyColor();
+                BuildSwatches(); // 선택 테두리 갱신
+            };
+            Swatches.Children.Add(b);
+        }
+        Swatches.Children.Add(CustomSwatch());
+    }
+
+    /// 사용자 지정 색: WinUI ColorPicker (색 영역 + RGB/hex 입력). 고른 색은 바로 창에 적용된다.
+    Button CustomSwatch()
+    {
+        var custom = _cfg.PipColor != null && Palette.All(p => p.Hex != _cfg.PipColor);
+        var picker = new ColorPicker
+        {
+            ColorSpectrumShape = ColorSpectrumShape.Box,
+            IsAlphaEnabled = false, // 투명도는 별도 슬라이더
+            IsMoreButtonVisible = false,
+            IsColorChannelTextInputVisible = true,
+            IsHexInputVisible = true,
+            Color = Brush(_cfg.PipColor ?? "#FFFFFF").Color,
+        };
+        picker.ColorChanged += (_, e) =>
+        {
+            _cfg.PipColor = $"#{e.NewColor.R:X2}{e.NewColor.G:X2}{e.NewColor.B:X2}";
+            ApplyColor(); // 저장은 닫을 때 한 번: hex 상자는 글자마다 색이 바뀌어 입력 중간값이 저장되지 않게
+        };
+        var flyout = new Flyout { Content = picker, ShouldConstrainToRootBounds = false };
+        // 열려 있는 동안 다시 만들면 플라이아웃이 닫히므로, 선택 테두리는 닫힐 때 갱신
+        flyout.Closed += (_, _) => { _cfg.Save(); BuildSwatches(); };
+        var b = Swatch(custom ? $"사용자 지정 ({_cfg.PipColor})" : "사용자 지정",
+                       custom ? _cfg.PipColor : null, custom, custom ? null : "");
+        b.Flyout = flyout;
+        return b;
+    }
+
+    static bool IsDark(string hex)
+    {
+        var c = Brush(hex).Color;
+        return 0.299 * c.R + 0.587 * c.G + 0.114 * c.B < 128;
+    }
+
+    void ApplyColor()
+    {
+        var hex = _cfg.PipColor;
+        var theme = hex == null ? ElementTheme.Default : IsDark(hex) ? ElementTheme.Dark : ElementTheme.Light;
+        Root.RequestedTheme = theme;
+        // OS가 그리는 닫기 버튼: 배경은 투명하게, 글자색은 창 색에 맞춘다
+        var tb = AppWindow.TitleBar;
+        tb.ButtonBackgroundColor = tb.ButtonInactiveBackgroundColor = Colors.Transparent;
+        tb.ButtonForegroundColor = theme switch
+        {
+            ElementTheme.Dark => Colors.White,
+            ElementTheme.Light => Colors.Black,
+            _ => null,
+        };
+        ApplyBackground();
+    }
+
+    void ApplyOpacity() => ApplyBackground();
+
+    /// 투명도는 배경에만: 투명 backdrop 위에 알파를 준 배경색을 깐다 (글씨·막대는 불투명 유지).
+    /// 시작할 때 100%면 1.0.3과 같은 Mica(색은 불투명 배경). 투명도를 낮추는 순간 투명 모드로 넘어가 이번 실행 동안 유지한다.
+    void ApplyBackground()
+    {
+        var hex = _cfg.PipColor;
+        if (!_translucent && _cfg.PipOpacity >= 100)
+        {
+            if (SystemBackdrop is not MicaBackdrop) SystemBackdrop = new MicaBackdrop();
+            Root.Background = hex == null ? null : Brush(hex);
+            return;
+        }
+        if (!_translucent)
+        {
+            _translucent = true;
+            SystemBackdrop = new TransparentBackdrop();
+            WindowTransparency.Enable(_hwnd);
+        }
+        // 기본 색은 Mica 대신 시스템 테마의 창 배경색
+        var c = Brush(hex ?? (Root.ActualTheme == ElementTheme.Dark ? "#202020" : "#F3F3F3")).Color;
+        c.A = (byte)(_cfg.PipOpacity * 255 / 100);
+        Root.Background = new SolidColorBrush(c);
+    }
+
+    static SolidColorBrush Brush(string hex) => new(Color.FromArgb(0xff,
+        Convert.ToByte(hex[1..3], 16), Convert.ToByte(hex[3..5], 16), Convert.ToByte(hex[5..7], 16)));
+
+    /// results: 이번 조회 결과, last: 마지막 성공 값. 실패한 agent는 직전 값을 회색으로.
+    (IReadOnlyDictionary<string, AgentResult>, IReadOnlyDictionary<string, AgentResult>, DateTime?)? _lastUpdate;
+
+    public void Update(IReadOnlyDictionary<string, AgentResult> results,
+                       IReadOnlyDictionary<string, AgentResult> last, DateTime? updatedAt)
+    {
+        _lastUpdate = (results, last, updatedAt); // 모드 전환 시 다시 그리기용
+        var mini = _cfg.PipMini;
+        Rows.Children.Clear();
+        foreach (var (agent, name) in new[] { ("claude", "Claude"), ("codex", "Codex") })
+        {
+            if (!results.TryGetValue(agent, out var r)) continue;
+            var usage = r.Usage ?? (last.TryGetValue(agent, out var l) ? l.Usage : null);
+            var stale = r.Usage == null;
+            foreach (var (label, w) in new[] { ("5h", usage?.FiveHour), ("week", usage?.Weekly) })
+                Rows.Children.Add(Row($"{name} {label}", w ?? default, stale, mini));
+            if (r.Error != null && !mini) // 미니에서는 오류 문구 대신 회색 막대로만 표시
+                Rows.Children.Add(new TextBlock { Text = $"{name}: {r.Error}", Opacity = 0.7, FontSize = 11 });
+        }
+        if (Rows.Children.Count == 0)
+            Rows.Children.Add(new TextBlock { Text = "트레이 메뉴에서 agent를 선택하세요", Opacity = 0.7 });
+        Footer.Text = updatedAt is { } t ? $"갱신 {t:HH:mm:ss}" : "조회 중…";
+    }
+
+    static Grid Row(string label, UsageWindow w, bool stale, bool mini = false)
+    {
+        var font = mini ? 12.0 : 14.0;
+        var color = Brush(stale ? UsageService.ColorUnknown : UsageService.ColorFor(w.Pct));
+        var g = new Grid { ColumnSpacing = 8 };
+        g.ColumnDefinitions.Add(new() { Width = new GridLength(mini ? 74 : 84) });
+        g.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        g.ColumnDefinitions.Add(new() { Width = new GridLength(mini ? 34 : 40) });
+        g.ColumnDefinitions.Add(new() { Width = new GridLength(mini ? 72 : 80) }); // 행마다 막대 길이가 같도록 고정 폭
+
+        var bar = new ProgressBar { Value = w.Pct ?? 0, Maximum = 100, Foreground = color, VerticalAlignment = VerticalAlignment.Center };
+        var pct = new TextBlock
+        {
+            Text = UsageService.FmtPct(w.Pct), Foreground = color, FontSize = font,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Right,
+        };
+        var reset = new TextBlock
+        {
+            Text = w.Reset is null ? "" : "↻" + UsageService.FmtTime(w.Reset),
+            Opacity = 0.6, FontSize = mini ? 11 : 12, VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(bar, 1);
+        Grid.SetColumn(pct, 2);
+        Grid.SetColumn(reset, 3);
+        g.Children.Add(new TextBlock { Text = label, FontSize = font });
+        g.Children.Add(bar);
+        g.Children.Add(pct);
+        g.Children.Add(reset);
+        return g;
+    }
+}
