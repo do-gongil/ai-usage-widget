@@ -2,7 +2,7 @@
 
 Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트레이 아이콘과 항상 위에 떠 있는 작은 창(PiP)으로 표시합니다. (Windows 10/11 전용, 비공식 도구)
 
-> **현재 버전은 Microsoft Store에 배포되는 C#/WinUI 3 앱(v1.0.6, `UsageWidget/`)입니다.** 아래 설치 안내는 레거시 Python 버전(`usage_widget.pyw`) 기준이며, Python 버전은 더 이상 기능을 추가하지 않습니다.
+> **현재 버전은 [Microsoft Store](https://apps.microsoft.com/detail/9NN9GN3KMSWN)에 배포되는 C#/WinUI 3 앱(v1.0.6, `UsageWidget/`)입니다.** Python 버전(`usage_widget.pyw`)은 레거시로 남겨 두며 더 이상 기능을 추가하지 않습니다.
 
 | PiP 창 | 미니 모드 |
 |---|---|
@@ -29,6 +29,12 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트�
 
 ## 설치
 
+**[Microsoft Store에서 받기](https://apps.microsoft.com/detail/9NN9GN3KMSWN)** — 설치·업데이트·제거 모두 Store에서 처리됩니다.
+
+- **Claude Code에 로그인되어 있어야 합니다**(`claude` 실행 → 로그인). 웹·데스크톱 앱만 쓰는 경우에도 Claude Code로 한 번 로그인하면 같은 계정의 사용률이 표시됩니다.
+
+### 레거시 Python 버전
+
 [Python 3.10 이상](https://www.python.org/downloads/)이 필요합니다(설치할 때 "Add python.exe to PATH" 체크).
 
 1. [Releases](https://github.com/do-gongil/ai-usage-widget/releases/latest)에서 `ai-usage-widget-python.zip`을 받아 원하는 위치에 압축을 풉니다. (또는 `git clone https://github.com/do-gongil/ai-usage-widget.git`)
@@ -42,7 +48,6 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트�
    ```
 4. 트레이 아이콘을 우클릭해 **시작 시 실행**을 켜 두면 로그인할 때 자동으로 뜹니다.
 
-- **Claude Code에 로그인되어 있어야 합니다**(`claude` 실행 → 로그인). 웹·데스크톱 앱만 쓰는 경우에도 Claude Code로 한 번 로그인하면 같은 계정의 사용률이 표시됩니다.
 - 서명된 `pythonw.exe`가 스크립트를 실행하므로 Windows **Smart App Control**이 켜진 PC에서도 차단되지 않습니다.
 - 업데이트: 트레이에서 종료한 뒤 새 파일로 덮어쓰고 다시 실행합니다. 설정은 `%APPDATA%\UsageTray`에 있어 유지됩니다.
 - 제거: 트레이에서 "시작 시 실행"을 끄고 종료한 뒤 폴더와 `%APPDATA%\UsageTray`를 삭제합니다.
@@ -50,7 +55,7 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트�
 ## 아이콘을 항상 보이게 하기
 
 새 트레이 아이콘은 기본적으로 `^` 숨김 영역에 들어갑니다.
-설정 → 개인 설정 → 작업 표시줄 → **기타 시스템 트레이 아이콘**에서 Python(pythonw)을 켜 주세요.
+설정 → 개인 설정 → 작업 표시줄 → **기타 시스템 트레이 아이콘**에서 Session Usage Widget(레거시 Python 버전은 pythonw)을 켜 주세요.
 
 ## 동작 방식과 보안
 
