@@ -1,6 +1,8 @@
 # AI Usage Widget
 
-Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트레이 아이콘과 항상 위에 떠 있는 작은 창(PiP)으로 표시합니다. (Windows 10/11 전용, 비공식 도구, Python)
+Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트레이 아이콘과 항상 위에 떠 있는 작은 창(PiP)으로 표시합니다. (Windows 10/11 전용, 비공식 도구)
+
+> **현재 버전은 Microsoft Store에 배포되는 C#/WinUI 3 앱(v1.0.6, `UsageWidget/`)입니다.** 아래 설치 안내는 레거시 Python 버전(`usage_widget.pyw`) 기준이며, Python 버전은 더 이상 기능을 추가하지 않습니다.
 
 | PiP 창 | 미니 모드 |
 |---|---|
@@ -72,16 +74,20 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트�
 ## 구조
 
 ```
-usage_widget.pyw      트레이(pystray) + PiP 창(tkinter), 전역 단축키
-usage_core.py         조회·파싱·설정 (UI 없음)
-test_usage_core.py    단위 테스트
-requirements.txt      pystray, Pillow
+UsageWidget/          C#/WinUI 3 앱 (Store 버전, MSIX)
+UsageWidget.Tests/    C# 단위 테스트
+build_store.bat       Store용 MSIX 빌드
+usage_widget.pyw      [레거시] 트레이(pystray) + PiP 창(tkinter), 전역 단축키
+usage_core.py         [레거시] 조회·파싱·설정 (UI 없음)
+test_usage_core.py    [레거시] 단위 테스트
+requirements.txt      [레거시] pystray, Pillow
 ```
 
 ## 테스트
 
 ```
+dotnet test UsageWidget.Tests
 python test_usage_core.py
 ```
 
-> v1.0.x는 C#/WinUI 3로 만든 이전 버전입니다. 서명 없는 exe가 Smart App Control에 차단되는 문제로 Python 버전(v2.0.0~)으로 전환했습니다.
+> Store 배포로 MSIX가 Microsoft 서명을 받으므로 Smart App Control 문제가 해결되어 C# 버전으로 돌아왔습니다. Python 버전은 레거시로 남겨 둡니다.
