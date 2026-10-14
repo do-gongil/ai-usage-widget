@@ -174,7 +174,7 @@ public sealed partial class MainWindow : Window
         // 전환할 때는 저장된 위치를 쓰지 않고 크기만 가져오므로, 옛 위치가 화면 밖이어도 크기는 쓴다
         var saved = r is { Length: 4 } && (keepPosition || IsOnScreen(r));
         // 처음 전환할 때: 작업 표시줄 높이(48)로 / 일반 창 기본 크기로
-        var (w, h) = saved ? (r![2], r[3]) : mini ? (Px(300), Px(48)) : (Px(300), Px(130));
+        var (w, h) = saved ? (r![2], r[3]) : mini ? (Px(360), Px(48)) : (Px(360), Px(150));
         var rect = keepPosition ? Resized(new RectInt32(oldPos.X, oldPos.Y, oldSize.Width, oldSize.Height), w, h, Px(16))
             : saved ? new RectInt32(r![0], r[1], w, h) : new RectInt32(oldPos.X, oldPos.Y, w, h);
         // 제목 표시줄 제거/복원이 뒤늦게 창 크기를 다시 계산하므로, 잠시 뒤 한 번 더 적용한다
@@ -359,8 +359,7 @@ public sealed partial class MainWindow : Window
             if (!results.TryGetValue(agent, out var r)) continue;
             var usage = r.Usage ?? (last.TryGetValue(agent, out var l) ? l.Usage : null);
             var stale = r.Usage == null;
-            foreach (var (label, w) in new[] { ("5h", usage?.FiveHour), ("week", usage?.Weekly) })
-                Rows.Children.Add(Row($"{name} {label}", w ?? default, stale, mini));
+            Rows.Children.Add(AgentRow(name, usage?.FiveHour ?? default, usage?.Weekly ?? default, stale, mini));
             if (r.Error != null && !mini) // 미니에서는 오류 문구 대신 회색 막대로만 표시
                 Rows.Children.Add(new TextBlock { Text = $"{name}: {r.Error}", Opacity = 0.7, FontSize = 11 });
         }
@@ -369,34 +368,58 @@ public sealed partial class MainWindow : Window
         Footer.Text = updatedAt is { } t ? $"갱신 {t:HH:mm:ss}" : "조회 중…";
     }
 
-    static Grid Row(string label, UsageWindow w, bool stale, bool mini = false)
+    /// agent당 한 줄: 이름 | 5시간 칸 | 주간 칸. 일반 창은 막대 아래에 리셋 시각을 작게 붙인다.
+    static Grid AgentRow(string name, UsageWindow h5, UsageWindow week, bool stale, bool mini)
+    {
+        var g = new Grid { ColumnSpacing = 10 };
+        g.ColumnDefinitions.Add(new() { Width = new GridLength(mini ? 50 : 56) });
+        g.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        g.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        g.Children.Add(new TextBlock { Text = name, FontSize = mini ? 12 : 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Top });
+        var c1 = Cell("5h", h5, stale, mini);
+        var c2 = Cell("W", week, stale, mini);
+        Grid.SetColumn(c1, 1);
+        Grid.SetColumn(c2, 2);
+        g.Children.Add(c1);
+        g.Children.Add(c2);
+        return g;
+    }
+
+    static Grid Cell(string label, UsageWindow w, bool stale, bool mini)
     {
         var font = mini ? 12.0 : 14.0;
         var color = Brush(stale ? UsageService.ColorUnknown : UsageService.ColorFor(w.Pct));
-        var g = new Grid { ColumnSpacing = 8 };
-        g.ColumnDefinitions.Add(new() { Width = new GridLength(mini ? 74 : 84) });
+        var g = new Grid { ColumnSpacing = 4 };
+        g.ColumnDefinitions.Add(new() { Width = new GridLength(mini ? 18 : 20) });
         g.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
         g.ColumnDefinitions.Add(new() { Width = new GridLength(mini ? 34 : 40) });
-        g.ColumnDefinitions.Add(new() { Width = new GridLength(mini ? 72 : 80) }); // 행마다 막대 길이가 같도록 고정 폭
-
-        var bar = new ProgressBar { Value = w.Pct ?? 0, Maximum = 100, Foreground = color, VerticalAlignment = VerticalAlignment.Center };
         var pct = new TextBlock
         {
             Text = UsageService.FmtPct(w.Pct), Foreground = color, FontSize = font,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Right,
         };
-        var reset = new TextBlock
-        {
-            Text = w.Reset is null ? "" : "↻" + UsageService.FmtTime(w.Reset),
-            Opacity = 0.6, FontSize = mini ? 11 : 12, VerticalAlignment = VerticalAlignment.Center,
-        };
+        var bar = new ProgressBar { Value = w.Pct ?? 0, Maximum = 100, Foreground = color, VerticalAlignment = VerticalAlignment.Center };
+        var lbl = new TextBlock { Text = label, FontSize = mini ? 11 : 12, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(bar, 1);
         Grid.SetColumn(pct, 2);
-        Grid.SetColumn(reset, 3);
-        g.Children.Add(new TextBlock { Text = label, FontSize = font });
+        g.Children.Add(lbl);
         g.Children.Add(bar);
         g.Children.Add(pct);
-        g.Children.Add(reset);
+        if (w.Reset is { } r)
+        {
+            var text = "↻" + UsageService.FmtTime(r);
+            if (mini) ToolTipService.SetToolTip(g, text); // ponytail: 미니는 폭이 좁아 리셋 시각을 툴팁으로
+            else
+            {
+                g.RowDefinitions.Add(new());
+                g.RowDefinitions.Add(new());
+                var t = new TextBlock { Text = text, Opacity = 0.6, FontSize = 11 };
+                Grid.SetRow(t, 1);
+                Grid.SetColumn(t, 1);
+                Grid.SetColumnSpan(t, 2);
+                g.Children.Add(t);
+            }
+        }
         return g;
     }
 }
