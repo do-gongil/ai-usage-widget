@@ -38,7 +38,7 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트�
 
 [Python 3.10 이상](https://www.python.org/downloads/)이 필요합니다(설치할 때 "Add python.exe to PATH" 체크).
 
-1. [Releases](https://github.com/do-gongil/ai-usage-widget/releases/latest)에서 `ai-usage-widget-python.zip`을 받아 원하는 위치에 압축을 풉니다. (또는 `git clone https://github.com/do-gongil/ai-usage-widget.git`)
+1. [v2.0.0 릴리스](https://github.com/do-gongil/ai-usage-widget/releases/tag/v2.0.0)에서 `ai-usage-widget-python.zip`을 받아 원하는 위치에 압축을 풉니다. (또는 `git clone https://github.com/do-gongil/ai-usage-widget.git`)
 2. 그 폴더에서 PowerShell(또는 명령 프롬프트)을 열고 필요한 패키지를 설치합니다.
    ```
    python -m pip install -r requirements.txt
