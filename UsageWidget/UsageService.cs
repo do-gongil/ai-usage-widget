@@ -201,6 +201,24 @@ public static class UsageService
         return prev.Usage == null || now - lastOkAt >= (MinInterval - 5) * 1000L;
     }
 
+    /// 실패 응답 코드 → 오류 문구. 429는 Retry-After 헤더가 필요해 호출부에서 처리.
+    public static string HttpError(int code) => code switch
+    {
+        401 => "토큰 만료 (Claude Code 실행 필요)",
+        403 => "권한 없음 (Claude Code 재로그인 필요)",
+        >= 500 and < 600 => "서버 오류, 잠시 후 재시도",
+        _ => $"HTTP {code}",
+    };
+
+    /// 200 응답 본문 → 결과. 읽을 수 있는 값이 하나도 없으면 오류로 돌려 직전 성공 값을 지킨다.
+    public static AgentResult ClaudeResult(string body)
+    {
+        Usage u;
+        try { u = ParseClaudeUsage(JsonNode.Parse(body)); }
+        catch (JsonException) { return new(Error: "응답 형식 오류"); }
+        return u.FiveHour.Pct == null && u.Weekly.Pct == null ? new(Error: "응답 형식 변경") : new(Usage: u);
+    }
+
     // 리다이렉트를 따라가지 않는다: 다른 호스트로 Authorization 헤더가 넘어가지 않게.
     static readonly HttpClient Http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(10) };
 
@@ -223,15 +241,13 @@ public static class UsageService
         try
         {
             using var resp = await Http.SendAsync(req);
-            if (resp.StatusCode == HttpStatusCode.Unauthorized) return new(Error: "토큰 만료 (Claude Code 실행 필요)");
             if (resp.StatusCode == HttpStatusCode.TooManyRequests)
             {
                 var ra = resp.Headers.TryGetValues("Retry-After", out var v) ? v.FirstOrDefault() : null;
                 return new(Error: "요청 제한, 잠시 후 재시도", RetryAfter: ra ?? "");
             }
-            if (!resp.IsSuccessStatusCode) return new(Error: $"HTTP {(int)resp.StatusCode}");
-            try { return new(Usage: ParseClaudeUsage(JsonNode.Parse(await resp.Content.ReadAsStringAsync()))); }
-            catch (JsonException) { return new(Error: "응답 형식 오류"); }
+            if (!resp.IsSuccessStatusCode) return new(Error: HttpError((int)resp.StatusCode));
+            return ClaudeResult(await resp.Content.ReadAsStringAsync());
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException)
         {

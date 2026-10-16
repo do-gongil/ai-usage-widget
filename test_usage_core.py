@@ -33,6 +33,18 @@ def test_claude_parse():
     assert uc.parse_claude_usage([1, 2])["weekly"] == (None, None)  # dict가 아닌 응답
 
 
+def test_claude_result_and_http_error():
+    assert uc.claude_result({"five_hour": {"utilization": 42}})["usage"]["five_hour"][0] == 42.0
+    assert uc.claude_result({"seven_day": {"utilization": 7}})["usage"]["weekly"][0] == 7.0  # 한쪽만 있어도 성공
+    # 값이 하나도 없으면 오류: 빈 결과가 직전 성공 값을 덮지 않게
+    for data in ({"five_hour": None}, {}, [], None):
+        assert uc.claude_result(data) == {"error": "응답 형식 변경"}
+    assert uc.http_error(401) == "토큰 만료 (Claude Code 실행 필요)"
+    assert uc.http_error(403) == "권한 없음 (Claude Code 재로그인 필요)"
+    assert uc.http_error(500) == uc.http_error(503) == "서버 오류, 잠시 후 재시도"
+    assert uc.http_error(404) == "HTTP 404"
+
+
 def test_codex_parse():
     line = json.dumps({"timestamp": "2026-09-23T05:00:00Z", "type": "event_msg", "payload": {
         "type": "token_count", "info": None,
@@ -181,13 +193,6 @@ def test_tooltip():
     assert len(uc.build_tooltip(["x" * 300])) == uc.TOOLTIP_MAX
 
 
-if __name__ == "__main__":
-    for name, fn in list(globals().items()):
-        if name.startswith("test_"):
-            fn()
-            print("ok", name)
-
-
 def test_clamp_to_work_area():
     wa = (0, 0, 1920, 1040)  # 작업 표시줄(40px)을 뺀 영역
     assert uc.clamp_to_work_area([100, 100, 300, 130], wa) == [100, 100, 300, 130]  # 안쪽이면 그대로
@@ -196,3 +201,10 @@ def test_clamp_to_work_area():
     assert uc.clamp_to_work_area([-50, -20, 300, 130], wa) == [0, 0, 300, 130]  # 왼쪽·위로 넘치면 안쪽으로
     assert uc.clamp_to_work_area([100, 100, 3000, 2000], wa) == [0, 0, 3000, 2000]  # 영역보다 크면 왼쪽 위에 붙임
     assert uc.clamp_to_work_area([-1800, 10, 300, 130], (-1920, 0, 0, 1040)) == [-1800, 10, 300, 130]  # 왼쪽 모니터(음수 좌표)
+
+
+if __name__ == "__main__":
+    for name, fn in list(globals().items()):
+        if name.startswith("test_"):
+            fn()
+            print("ok", name)

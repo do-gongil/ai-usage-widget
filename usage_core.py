@@ -281,6 +281,25 @@ _OPENER = urllib.request.build_opener(
     _NoRedirect, urllib.request.HTTPSHandler(context=ssl.create_default_context()))
 
 
+def http_error(code):
+    """실패 응답 코드 → 오류 문구. 429는 Retry-After 헤더가 필요해 호출부에서 처리."""
+    if code == 401:
+        return "토큰 만료 (Claude Code 실행 필요)"
+    if code == 403:
+        return "권한 없음 (Claude Code 재로그인 필요)"
+    if 500 <= code < 600:
+        return "서버 오류, 잠시 후 재시도"
+    return f"HTTP {code}"
+
+
+def claude_result(data):
+    """200 응답 JSON → 결과. 읽을 수 있는 값이 하나도 없으면 오류로 돌려 직전 성공 값을 지킨다."""
+    usage = parse_claude_usage(data)
+    if all(pct is None for pct, _ in usage.values()):
+        return {"error": "응답 형식 변경"}
+    return {"usage": usage}
+
+
 def fetch_claude():
     # 토큰 갱신은 Claude Code에 맡긴다. 여기서 credentials 파일을 쓰면 로그인이 깨질 수 있다.
     try:
@@ -297,13 +316,11 @@ def fetch_claude():
     })
     try:
         with _OPENER.open(req, timeout=10) as resp:
-            return {"usage": parse_claude_usage(json.load(resp))}
+            return claude_result(json.load(resp))
     except urllib.error.HTTPError as e:
-        if e.code == 401:
-            return {"error": "토큰 만료 (Claude Code 실행 필요)"}
         if e.code == 429:
             return {"error": "요청 제한, 잠시 후 재시도", "retry_after": e.headers.get("Retry-After") or ""}
-        return {"error": f"HTTP {e.code}"}
+        return {"error": http_error(e.code)}
     except (urllib.error.URLError, TimeoutError, OSError):
         return {"error": "오프라인"}
     except ValueError:

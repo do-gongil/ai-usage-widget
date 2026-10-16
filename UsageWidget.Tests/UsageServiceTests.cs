@@ -43,6 +43,22 @@ public class UsageServiceTests
     }
 
     [Fact]
+    public void ClaudeResultAndHttpError()
+    {
+        Assert.Equal(42.0, S.ClaudeResult("""{"five_hour":{"utilization":42}}""").Usage!.FiveHour.Pct);
+        Assert.Equal(7.0, S.ClaudeResult("""{"seven_day":{"utilization":7}}""").Usage!.Weekly.Pct); // 한쪽만 있어도 성공
+        // 값이 하나도 없으면 오류: 빈 결과가 직전 성공 값을 덮지 않게
+        foreach (var body in new[] { """{"five_hour":null}""", "{}", "[]", "null" })
+            Assert.Equal(new AgentResult(Error: "응답 형식 변경"), S.ClaudeResult(body));
+        Assert.Equal(new AgentResult(Error: "응답 형식 오류"), S.ClaudeResult("{broken"));
+        Assert.Equal("토큰 만료 (Claude Code 실행 필요)", S.HttpError(401));
+        Assert.Equal("권한 없음 (Claude Code 재로그인 필요)", S.HttpError(403));
+        Assert.Equal("서버 오류, 잠시 후 재시도", S.HttpError(500));
+        Assert.Equal("서버 오류, 잠시 후 재시도", S.HttpError(503));
+        Assert.Equal("HTTP 404", S.HttpError(404));
+    }
+
+    [Fact]
     public void CodexParse()
     {
         const string line = """{"timestamp":"2026-09-23T05:00:00Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":{"used_percent":12.5,"window_minutes":300,"resets_in_seconds":3600},"secondary":{"used_percent":3,"resets_at":1790000000}}}}""";
