@@ -25,13 +25,14 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트�
 
 **공통**
 - 한 번에 하나만 실행됩니다. 5분마다 갱신하고, 요청 제한(429)을 받으면 최대 10분까지 조회 간격을 늘립니다. 조회에 성공한 뒤 5분 안에는 새로고침을 눌러도 Claude를 다시 조회하지 않습니다(429 예방).
-- 설정: `%APPDATA%\UsageTray\config.json` (`interval` 300~86400초)
+- 설정·마지막 값: Store 앱은 `%LOCALAPPDATA%\Packages\do-gongil.SessionUsageWidget_<ID>\LocalCache\Roaming\UsageTray\` (MSIX가 `%APPDATA%` 쓰기를 이 위치로 돌림), 레거시 Python 버전은 `%APPDATA%\UsageTray\`. `config.json`의 `interval`은 300~86400초
 
 ## 설치
 
 **[Microsoft Store에서 받기](https://apps.microsoft.com/detail/9NN9GN3KMSWN)** — 설치·업데이트·제거 모두 Store에서 처리됩니다.
 
 - **Claude Code에 로그인되어 있어야 합니다**(`claude` 실행 → 로그인). 웹·데스크톱 앱만 쓰는 경우에도 Claude Code로 한 번 로그인하면 같은 계정의 사용률이 표시됩니다.
+- Store 앱을 제거하면 위 Store 설정 폴더와 "시작 시 실행" 등록도 함께 지워집니다. 읽기만 하는 `~\.claude`, `~\.codex`는 그대로이고, 레거시 Python 버전을 쓴 적이 있다면 그 버전의 `%APPDATA%\UsageTray`는 남으므로 직접 지웁니다.
 
 ### 레거시 Python 버전
 
@@ -70,7 +71,7 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트�
 
 ## 한계
 
-- `/api/oauth/usage`는 **공식 문서에 없는 엔드포인트**라 예고 없이 바뀔 수 있습니다.
+- `/api/oauth/usage`는 **공식 문서에 없는 엔드포인트**라 예고 없이 바뀔 수 있습니다. 응답에서 사용률을 하나도 읽지 못하면 "응답 형식 변경"으로 표시하고 직전 값을 회색으로 유지합니다.
 - 토큰이 만료되면 "토큰 만료"로 표시됩니다. Claude Code를 한 번 실행하면 다시 정상으로 돌아옵니다.
 - Codex 값은 **Codex를 마지막으로 사용한 시점** 기준입니다.
 - API 키(Console 과금) 사용자에게는 5시간·주간 한도가 없어 표시할 값이 없습니다.
