@@ -374,9 +374,12 @@ public sealed partial class MainWindow : Window
             if (!results.TryGetValue(agent, out var r)) continue;
             var usage = r.Usage ?? (last.TryGetValue(agent, out var l) ? l.Usage : null);
             var stale = r.Usage == null;
-            Rows.Children.Add(AgentRow(name, usage?.FiveHour ?? default, usage?.Weekly ?? default, stale, mini));
-            if (r.Error != null && !mini) // 미니에서는 오류 문구 대신 회색 막대로만 표시
-                Rows.Children.Add(new TextBlock { Text = $"{name}: {r.Error}", Opacity = 0.7, FontSize = 11 });
+            var row = AgentRow(name, usage?.FiveHour ?? default, usage?.Weekly ?? default, stale, mini);
+            Rows.Children.Add(row);
+            if (r.Error == null) continue;
+            // 미니는 줄을 늘리지 않고 툴팁으로: '--'만 보이면 이유를 알 수 없다
+            if (mini) ToolTipService.SetToolTip(row, $"{name}: {r.Error}");
+            else Rows.Children.Add(new TextBlock { Text = $"{name}: {r.Error}", Opacity = 0.7, FontSize = 11 });
         }
         if (Rows.Children.Count == 0)
             Rows.Children.Add(new TextBlock { Text = "트레이 메뉴에서 agent를 선택하세요", Opacity = 0.7 });

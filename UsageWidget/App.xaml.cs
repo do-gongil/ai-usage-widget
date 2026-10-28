@@ -68,7 +68,7 @@ public partial class App : Application
         if (_cfg.Codex) _results["codex"] = new(Error: "조회 중");
         Draw();
         if (_cfg.PipVisible) _pip.SetVisible(true);
-        WatchCodex();
+        WatchFiles();
         _ = LoopAsync();
     }
 
@@ -84,7 +84,7 @@ public partial class App : Application
     MenuFlyout BuildMenu()
     {
         // 체크 상태는 설정값에서 다시 계산한다 (팝업 메뉴 모드에서 IsChecked 자동 토글에 기대지 않음)
-        ToggleMenuFlyoutItem claude = null!, codex = null!, pip = null!, autostart = null!;
+        ToggleMenuFlyoutItem claude = null!, codex = null!, pip = null!, autostart = null!, link = null!;
         MenuFlyoutItem view = null!;
         claude = new() { Text = "Claude", IsChecked = _cfg.Claude, Command = new Command(() => { claude.IsChecked = _cfg.Claude = !_cfg.Claude; Toggled(); }) };
         codex = new() { Text = "Codex", IsChecked = _cfg.Codex, Command = new Command(() => { codex.IsChecked = _cfg.Codex = !_cfg.Codex; Toggled(); }) };
@@ -97,16 +97,24 @@ public partial class App : Application
             Draw();
         }) };
         autostart = new() { Text = "시작 시 실행", Command = new Command(async () => await SetAutostart(!await AutostartEnabled())) };
+        // Claude Code statusLine에 등록: 기존 statusLine 명령은 그대로 이어서 실행된다
+        link = new() { Text = "Claude Code 즉시 반영", Command = new Command(() =>
+        {
+            if (ClaudeLink.SetEnabled(ClaudeLink.SettingsPath, !ClaudeLink.IsEnabled(ClaudeLink.SettingsPath)) is { } err)
+                _tray.ToolTipText = S.BuildTooltip([err]);
+            link.IsChecked = ClaudeLink.IsEnabled(ClaudeLink.SettingsPath);
+        }) };
 
         var menu = new MenuFlyout();
         menu.Opening += async (_, _) =>
         {
             pip.IsChecked = _pip.IsShown; // 창 닫기 버튼으로 숨긴 경우도 반영
+            link.IsChecked = ClaudeLink.IsEnabled(ClaudeLink.SettingsPath); // settings.json을 직접 고친 경우도 반영
             autostart.IsChecked = await AutostartEnabled();
         };
         foreach (var item in new MenuFlyoutItemBase[]
                  {
-                     claude, codex, new MenuFlyoutSeparator(), pip, view,
+                     claude, codex, link, new MenuFlyoutSeparator(), pip, view,
                      new MenuFlyoutItem { Text = "지금 새로고침", Command = new Command(() => _wake.TrySetResult()) },
                      autostart,
                      new MenuFlyoutItem { Text = "종료", Command = new Command(Quit) },
@@ -139,6 +147,8 @@ public partial class App : Application
 
     async Task<AgentResult> ClaudeAsync()
     {
+        // Claude Code가 최근에 넘긴 값이 있으면 API를 부르지 않는다 (429와 무관, 응답마다 갱신)
+        if (ClaudeLink.ReadLive(DateTimeOffset.UtcNow) is { } live) return _claudePrev = live;
         var now = Environment.TickCount64;
         if (!S.ShouldFetch(_claudePrev, now, _claudeUntil, _claudeOkAt))
             return _claudePrev!; // 429 대기 중이거나 직전 성공 후 5분 미만: 직전 결과 재사용
@@ -210,31 +220,39 @@ public partial class App : Application
         _tray.ToolTipText = S.BuildTooltip(lines);
     }
 
-    // ---------- Codex 기록 감시 ----------
+    // ---------- 기록 파일 감시 (Codex 세션, Claude Code statusLine) ----------
 
-    FileSystemWatcher? _codexWatcher; // GC에 수거되지 않게 필드로 붙잡아 둔다
-    Microsoft.UI.Dispatching.DispatcherQueueTimer? _codexDebounce;
+    readonly List<FileSystemWatcher> _watchers = []; // GC에 수거되지 않게 필드로 붙잡아 둔다
 
-    /// Codex가 세션 기록을 쓰면 곧바로 다시 읽는다: 답변 한 번에 여러 줄을 쓰므로 마지막 쓰기 1초 뒤 한 번만.
-    void WatchCodex()
+    void WatchFiles()
     {
-        var dir = Path.Combine(S.CodexHome, "sessions");
-        if (!Directory.Exists(dir)) return; // ponytail: Codex를 나중에 설치하면 앱을 다시 켠 뒤부터 감시. 그 전엔 정기 조회
+        // ponytail: Codex를 나중에 설치하면 앱을 다시 켠 뒤부터 감시. 그 전엔 정기 조회
+        Watch(Path.Combine(S.CodexHome, "sessions"), "*.jsonl", true, () => _cfg.Codex);
+        Directory.CreateDirectory(Config.Dir);
+        Watch(Config.Dir, ClaudeLink.LiveName, false, () => _cfg.Claude);
+    }
+
+    /// 파일이 바뀌면 곧바로 다시 읽는다: 답변 한 번에 여러 번 쓰므로 마지막 쓰기 1초 뒤 한 번만.
+    void Watch(string dir, string filter, bool subdirs, Func<bool> enabled)
+    {
+        if (!Directory.Exists(dir)) return;
         var dq = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
-        _codexDebounce = dq.CreateTimer();
-        _codexDebounce.Interval = TimeSpan.FromSeconds(1);
-        _codexDebounce.IsRepeating = false;
-        _codexDebounce.Tick += (_, _) => { if (_cfg.Codex) _wake.TrySetResult(); };
-        _codexWatcher = new FileSystemWatcher(dir, "*.jsonl")
+        var debounce = dq.CreateTimer();
+        debounce.Interval = TimeSpan.FromSeconds(1);
+        debounce.IsRepeating = false;
+        debounce.Tick += (_, _) => { if (enabled()) _wake.TrySetResult(); };
+        var w = new FileSystemWatcher(dir, filter)
         {
-            IncludeSubdirectories = true,
+            IncludeSubdirectories = subdirs,
             NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName,
         };
         // 감시 이벤트는 스레드 풀에서 온다 → UI 스레드로 넘겨 타이머를 다시 건다
-        FileSystemEventHandler onWrite = (_, _) => dq.TryEnqueue(() => { _codexDebounce.Stop(); _codexDebounce.Start(); });
-        _codexWatcher.Changed += onWrite;
-        _codexWatcher.Created += onWrite;
-        _codexWatcher.EnableRaisingEvents = true;
+        void OnWrite() => dq.TryEnqueue(() => { debounce.Stop(); debounce.Start(); });
+        w.Changed += (_, _) => OnWrite();
+        w.Created += (_, _) => OnWrite();
+        w.Renamed += (_, _) => OnWrite(); // statusLine 명령은 임시 파일을 mv로 교체한다
+        w.EnableRaisingEvents = true;
+        _watchers.Add(w);
     }
 
     // ---------- 아이콘 (render_icon 이식) ----------

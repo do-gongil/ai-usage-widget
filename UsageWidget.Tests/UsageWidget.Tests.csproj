@@ -9,6 +9,7 @@
     <!-- WinUI 앱 프로젝트를 참조하지 않고 순수 로직 파일만 컴파일 -->
     <Compile Include="..\UsageWidget\UsageService.cs" Link="UsageService.cs" />
     <Compile Include="..\UsageWidget\Settings.cs" Link="Settings.cs" />
+    <Compile Include="..\UsageWidget\ClaudeLink.cs" Link="ClaudeLink.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
