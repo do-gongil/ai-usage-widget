@@ -68,6 +68,7 @@ public partial class App : Application
         if (_cfg.Codex) _results["codex"] = new(Error: "조회 중");
         Draw();
         if (_cfg.PipVisible) _pip.SetVisible(true);
+        WatchCodex();
         _ = LoopAsync();
     }
 
@@ -159,20 +160,13 @@ public partial class App : Application
         if (_cfg.Claude) results["claude"] = await ClaudeAsync();
         if (_cfg.Codex) results["codex"] = await Task.Run(S.ReadCodex);
 
-        var lines = new List<string>();
-        foreach (var (agent, name) in new[] { ("claude", "Claude"), ("codex", "Codex") })
-        {
-            if (!results.TryGetValue(agent, out var r)) continue;
-            lines.Add(S.FormatLine(name, r, _last.GetValueOrDefault(agent)));
+        foreach (var (agent, r) in results)
             if (r.Usage != null) _last[agent] = r;
-        }
         if (results.Values.Any(r => r.Usage != null)) Config.SaveLast(_last);
         if (_stopped) return;
 
         _results = results;
         _updatedAt = DateTime.Now;
-        if (lines.Count > 0) lines.Add($"갱신 {_updatedAt:HH:mm:ss}");
-        _tray.ToolTipText = S.BuildTooltip(lines);
         Draw();
     }
 
@@ -191,16 +185,56 @@ public partial class App : Application
                 }
                 catch (Exception) { } // 표시에 실패해도 루프는 계속 돈다
             }
-            await Task.WhenAny(_wake.Task, Task.Delay(TimeSpan.FromSeconds(_cfg.Interval)));
+            // 리셋 시각이 먼저 오면 그때 깨어나 0%로 다시 그린다 (Claude API 호출은 ShouldFetch가 5분 간격으로 막는다)
+            var delay = TimeSpan.FromSeconds(_cfg.Interval);
+            if (S.NextReset(_results.Values.Concat(_last.Values), DateTimeOffset.UtcNow) is { } next
+                && next - DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1) is var untilReset && untilReset < delay)
+                delay = untilReset;
+            await Task.WhenAny(_wake.Task, Task.Delay(delay));
             _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
     }
 
     void Draw()
     {
-        var (pct, stale) = S.IconState(_results, _last, _cfg.View);
+        var now = DateTimeOffset.UtcNow;
+        var (results, last) = (S.ExpireAll(_results, now), S.ExpireAll(_last, now));
+        var (pct, stale) = S.IconState(results, last, _cfg.View);
         SetIcon(RenderIcon(pct, stale, ViewLabels[_cfg.View]));
-        _pip.Update(_results, _last, _updatedAt);
+        _pip.Update(results, last, _updatedAt);
+
+        var lines = new List<string>();
+        foreach (var (agent, name) in new[] { ("claude", "Claude"), ("codex", "Codex") })
+            if (results.TryGetValue(agent, out var r)) lines.Add(S.FormatLine(name, r, last.GetValueOrDefault(agent)));
+        if (lines.Count > 0 && _updatedAt != null) lines.Add($"갱신 {_updatedAt:HH:mm:ss}");
+        _tray.ToolTipText = S.BuildTooltip(lines);
+    }
+
+    // ---------- Codex 기록 감시 ----------
+
+    FileSystemWatcher? _codexWatcher; // GC에 수거되지 않게 필드로 붙잡아 둔다
+    Microsoft.UI.Dispatching.DispatcherQueueTimer? _codexDebounce;
+
+    /// Codex가 세션 기록을 쓰면 곧바로 다시 읽는다: 답변 한 번에 여러 줄을 쓰므로 마지막 쓰기 1초 뒤 한 번만.
+    void WatchCodex()
+    {
+        var dir = Path.Combine(S.CodexHome, "sessions");
+        if (!Directory.Exists(dir)) return; // ponytail: Codex를 나중에 설치하면 앱을 다시 켠 뒤부터 감시. 그 전엔 정기 조회
+        var dq = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        _codexDebounce = dq.CreateTimer();
+        _codexDebounce.Interval = TimeSpan.FromSeconds(1);
+        _codexDebounce.IsRepeating = false;
+        _codexDebounce.Tick += (_, _) => { if (_cfg.Codex) _wake.TrySetResult(); };
+        _codexWatcher = new FileSystemWatcher(dir, "*.jsonl")
+        {
+            IncludeSubdirectories = true,
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName,
+        };
+        // 감시 이벤트는 스레드 풀에서 온다 → UI 스레드로 넘겨 타이머를 다시 건다
+        FileSystemEventHandler onWrite = (_, _) => dq.TryEnqueue(() => { _codexDebounce.Stop(); _codexDebounce.Start(); });
+        _codexWatcher.Changed += onWrite;
+        _codexWatcher.Created += onWrite;
+        _codexWatcher.EnableRaisingEvents = true;
     }
 
     // ---------- 아이콘 (render_icon 이식) ----------

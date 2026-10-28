@@ -121,6 +121,14 @@ public static class UsageService
         return new(E(u.FiveHour), E(u.Weekly));
     }
 
+    /// 표시 직전에 적용: 다음 조회(최대 5분)를 기다리지 않고, 오프라인일 때의 직전 값도 리셋이 지나면 0%로.
+    public static Dictionary<string, AgentResult> ExpireAll(IReadOnlyDictionary<string, AgentResult> d, DateTimeOffset now) =>
+        d.ToDictionary(kv => kv.Key, kv => kv.Value.Usage is { } u ? kv.Value with { Usage = ExpirePassed(u, now) } : kv.Value);
+
+    /// 아직 오지 않은 가장 이른 리셋 시각. 그때 다시 그려 0%로 바꾼다.
+    public static DateTimeOffset? NextReset(IEnumerable<AgentResult> rs, DateTimeOffset now) =>
+        rs.SelectMany(r => r.Usage is { } u ? new[] { u.FiveHour.Reset, u.Weekly.Reset } : []).Where(t => t > now).Min();
+
     // ---------- 표시 ----------
 
     public static string ColorFor(double? pct) => pct switch

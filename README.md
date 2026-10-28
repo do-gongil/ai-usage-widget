@@ -2,7 +2,7 @@
 
 Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트레이 아이콘과 항상 위에 떠 있는 작은 창(PiP)으로 표시합니다. (Windows 10/11 전용, 비공식 도구)
 
-> **현재 버전은 [Microsoft Store](https://apps.microsoft.com/detail/9NN9GN3KMSWN)에 배포되는 C#/WinUI 3 앱(v1.0.7, `UsageWidget/`)입니다.** Python 버전(`usage_widget.pyw`)은 레거시로 남겨 두며 더 이상 기능을 추가하지 않습니다.
+> **현재 버전은 [Microsoft Store](https://apps.microsoft.com/detail/9NN9GN3KMSWN)에 배포되는 C#/WinUI 3 앱(v1.0.8, `UsageWidget/`)입니다.** Python 버전(`usage_widget.pyw`)은 레거시로 남겨 두며 더 이상 기능을 추가하지 않습니다.
 
 | PiP 창 | 미니 모드 |
 |---|---|

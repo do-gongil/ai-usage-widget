@@ -133,7 +133,22 @@ public sealed partial class MainWindow : Window
 
     Microsoft.UI.Dispatching.DispatcherQueueTimer? _resizeTimer;
     RectInt32 _pendingRect;
-    void ResizeTick(Microsoft.UI.Dispatching.DispatcherQueueTimer t, object o) => AppWindow.MoveAndResize(_pendingRect);
+    void ResizeTick(Microsoft.UI.Dispatching.DispatcherQueueTimer t, object o)
+    {
+        AppWindow.MoveAndResize(_pendingRect);
+        FitHeight();
+    }
+
+    /// 일반 창 높이를 내용(agent 줄 수·오류 문구)에 맞춘다. 폭은 사용자가 정한 대로 둔다.
+    void FitHeight()
+    {
+        if (_cfg.PipMini || Root.ActualWidth <= 0 || _resizeTimer?.IsRunning == true) return;
+        Root.Measure(new Windows.Foundation.Size(Root.ActualWidth, double.PositiveInfinity));
+        var h = Px(Root.DesiredSize.Height) + AppWindow.Size.Height - AppWindow.ClientSize.Height; // + 테두리
+        if (Math.Abs(h - AppWindow.Size.Height) <= 1) return;
+        var (pos, size) = (AppWindow.Position, AppWindow.Size);
+        AppWindow.MoveAndResize(Resized(new RectInt32(pos.X, pos.Y, size.Width, size.Height), size.Width, h, Px(16)));
+    }
 
     /// 미니 모드 버튼을 X 바로 왼쪽에: 오른쪽 여백 = X 버튼 영역 폭 - Root 오른쪽 패딩
     void AlignMiniButton()
@@ -366,6 +381,7 @@ public sealed partial class MainWindow : Window
         if (Rows.Children.Count == 0)
             Rows.Children.Add(new TextBlock { Text = "트레이 메뉴에서 agent를 선택하세요", Opacity = 0.7 });
         Footer.Text = updatedAt is { } t ? $"갱신 {t:HH:mm:ss}" : "조회 중…";
+        FitHeight();
     }
 
     /// agent당 한 줄: 이름 | 5시간 칸 | 주간 칸. 일반 창은 막대 아래에 리셋 시각을 작게 붙인다.
@@ -405,21 +421,20 @@ public sealed partial class MainWindow : Window
         g.Children.Add(lbl);
         g.Children.Add(bar);
         g.Children.Add(pct);
-        if (w.Reset is { } r)
+        var text = w.Reset is { } r ? "↻" + UsageService.FmtTime(r) : "";
+        if (mini)
         {
-            var text = "↻" + UsageService.FmtTime(r);
-            if (mini) ToolTipService.SetToolTip(g, text); // ponytail: 미니는 폭이 좁아 리셋 시각을 툴팁으로
-            else
-            {
-                g.RowDefinitions.Add(new());
-                g.RowDefinitions.Add(new());
-                var t = new TextBlock { Text = text, Opacity = 0.6, FontSize = 11 };
-                Grid.SetRow(t, 1);
-                Grid.SetColumn(t, 1);
-                Grid.SetColumnSpan(t, 2);
-                g.Children.Add(t);
-            }
+            if (text != "") ToolTipService.SetToolTip(g, text); // ponytail: 미니는 폭이 좁아 리셋 시각을 툴팁으로
+            return g;
         }
+        // 리셋 시각이 없어도 자리는 만든다: 같은 줄의 5h·W 막대 높이가 어긋나지 않게
+        g.RowDefinitions.Add(new() { Height = GridLength.Auto });
+        g.RowDefinitions.Add(new() { Height = GridLength.Auto });
+        var t = new TextBlock { Text = text, Opacity = 0.6, FontSize = 11 };
+        Grid.SetRow(t, 1);
+        Grid.SetColumn(t, 1);
+        Grid.SetColumnSpan(t, 2);
+        g.Children.Add(t);
         return g;
     }
 }

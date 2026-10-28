@@ -107,6 +107,21 @@ public class UsageServiceTests
     }
 
     [Fact]
+    public void ExpireAllAndNextReset()
+    {
+        var now = new DateTimeOffset(2026, 9, 23, 12, 0, 0, TimeSpan.Zero);
+        var d = D(("claude", new(Usage: new Usage(new(50, now.AddMinutes(-1)), new(20, now.AddDays(1))))),
+                  ("codex", new(Usage: new Usage(new(30, now.AddHours(2)), new(10, null)))),
+                  ("err", new(Error: "오프라인")));
+        var o = S.ExpireAll(d, now);
+        Assert.Equal(0.0, o["claude"].Usage!.FiveHour.Pct);
+        Assert.Equal(30, o["codex"].Usage!.FiveHour.Pct);
+        Assert.Equal("오프라인", o["err"].Error);
+        Assert.Equal(now.AddHours(2), S.NextReset(d.Values, now)); // 지난 시각·null 제외
+        Assert.Null(S.NextReset([new(Error: "x")], now));
+    }
+
+    [Fact]
     public void LastCacheRoundtrip()
     {
         var future = DateTimeOffset.UtcNow.AddHours(2);
