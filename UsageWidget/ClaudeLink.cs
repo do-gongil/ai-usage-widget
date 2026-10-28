@@ -10,14 +10,18 @@ namespace UsageWidget;
 public static class ClaudeLink
 {
     public const string LiveName = "claude-live.json";
-    public static string LivePath => Path.Combine(Config.Dir, LiveName);
-    static string PrevPath => Path.Combine(Config.Dir, "statusline-prev.json");
 
     public static string SettingsPath =>
         Path.Combine(Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is { Length: > 0 } d ? d
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"), "settings.json");
 
+    /// settings.json 옆(~/.claude)에 둔다: Store(MSIX) 앱의 %APPDATA% 쓰기는 패키지 폴더로 돌려져
+    /// bash가 쓰는 실제 %APPDATA%와 어긋난다. ~/.claude는 가상화되지 않아 양쪽이 같은 파일을 본다.
+    public static string LivePathFor(string settingsPath) => Path.Combine(Path.GetDirectoryName(settingsPath)!, LiveName);
+    public static string LivePath => LivePathFor(SettingsPath);
+
     static string Quote(string s) => "'" + s.Replace("'", "'\\''") + "'";
+    const string ChainSep = "; printf '%s' \"$input\" | ( ";
 
     /// statusLine은 Windows에서도 Git Bash로 실행된다. rate_limits가 있을 때만 저장한다:
     /// 새 세션은 첫 응답 전까지 rate_limits가 없어서, 그대로 쓰면 다른 세션의 값을 지운다.
@@ -26,8 +30,13 @@ public static class ClaudeLink
     {
         var p = livePath.Replace('\\', '/');
         var cmd = $"input=$(cat); case \"$input\" in *'\"rate_limits\"'*) printf '%s' \"$input\" > {Quote(p + ".tmp")} && mv -f {Quote(p + ".tmp")} {Quote(p)};; esac";
-        return string.IsNullOrWhiteSpace(prev) ? cmd : $"{cmd}; printf '%s' \"$input\" | ( {prev} )";
+        return string.IsNullOrWhiteSpace(prev) ? cmd : $"{cmd}{ChainSep}{prev} )";
     }
+
+    /// BuildCommand가 감싼 기존 명령을 되찾는다 (없으면 null). 별도 파일에 두지 않아 앱을 지워도 복원된다.
+    public static string? PrevOf(string command) =>
+        command.IndexOf(ChainSep, StringComparison.Ordinal) is var i and >= 0 && command.EndsWith(" )")
+            ? command[(i + ChainSep.Length)..^2] : null;
 
     public static bool IsLinked(string? command) => command?.Contains(LiveName) == true;
 
@@ -58,28 +67,30 @@ public static class ClaudeLink
     }
 
     /// 켜기/끄기. 실패하면 사유, 성공하면 null. settings.json을 읽지 못하면 건드리지 않는다.
+    /// 켜져 있는데 명령이 현재 형식과 다르면(이전 버전의 경로 등) 다시 쓴다.
     public static string? SetEnabled(string settingsPath, bool on)
     {
         try
         {
             var root = LoadSettings(settingsPath);
-            if (IsLinked(CommandOf(root)) == on) return null;
+            var cur = CommandOf(root);
+            var linked = IsLinked(cur);
+            // 기존 설정(padding, refreshInterval 등)은 두고 명령만 바꾼다
+            var sl = root["statusLine"] as JsonObject ?? new JsonObject();
+            var prev = linked ? PrevOf(cur!) : cur;
             if (on)
             {
-                var prev = root["statusLine"]?.DeepClone();
-                Directory.CreateDirectory(Config.Dir);
-                File.WriteAllText(PrevPath, prev?.ToJsonString() ?? "null", Encoding.UTF8);
-                // 기존 설정(padding, refreshInterval 등)은 두고 명령만 감싼다
-                var sl = prev as JsonObject ?? new JsonObject();
+                var want = BuildCommand(prev, LivePathFor(settingsPath));
+                if (cur == want) return null;
                 sl["type"] = "command";
-                sl["command"] = BuildCommand(CommandOf(root), LivePath);
+                sl["command"] = want;
                 root["statusLine"] = sl;
             }
             else
             {
-                var prev = File.Exists(PrevPath) ? JsonNode.Parse(File.ReadAllText(PrevPath, Encoding.UTF8)) : null;
+                if (!linked) return null;
                 if (prev == null) root.Remove("statusLine");
-                else root["statusLine"] = prev;
+                else sl["command"] = prev;
             }
             SaveSettings(settingsPath, root);
             return null;

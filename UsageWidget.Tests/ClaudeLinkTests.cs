@@ -32,7 +32,16 @@ public class ClaudeLinkTests
             var sl = JsonNode.Parse(File.ReadAllText(settings))!["statusLine"]!;
             Assert.Contains("( echo hud )", (string)sl["command"]!); // 기존 명령을 이어서 실행
             Assert.Equal(1, (int)sl["padding"]!);
+            Assert.Contains(ClaudeLink.LivePathFor(settings).Replace('\\', '/'), (string)sl["command"]!); // settings.json 옆
             Assert.Null(ClaudeLink.SetEnabled(settings, true)); // 두 번 켜도 중복으로 감싸지 않음
+            Assert.Equal((string)sl["command"]!, (string)JsonNode.Parse(File.ReadAllText(settings))!["statusLine"]!["command"]!);
+
+            // 이전 버전(v1.0.9)이 다른 경로로 등록한 명령: 켜면 새 경로로 갱신, 기존 명령은 유지
+            var old = ClaudeLink.BuildCommand("echo hud", @"C:\old\UsageTray\claude-live.json");
+            File.WriteAllText(settings, new JsonObject { ["model"] = "opus", ["statusLine"] = new JsonObject { ["type"] = "command", ["command"] = old, ["padding"] = 1 } }.ToJsonString());
+            Assert.Null(ClaudeLink.SetEnabled(settings, true));
+            Assert.Equal((string)sl["command"]!, (string)JsonNode.Parse(File.ReadAllText(settings))!["statusLine"]!["command"]!);
+
             Assert.Null(ClaudeLink.SetEnabled(settings, false));
             var back = JsonNode.Parse(File.ReadAllText(settings))!;
             Assert.Equal("echo hud", (string)back["statusLine"]!["command"]!);

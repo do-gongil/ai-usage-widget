@@ -68,6 +68,8 @@ public partial class App : Application
         if (_cfg.Codex) _results["codex"] = new(Error: "조회 중");
         Draw();
         if (_cfg.PipVisible) _pip.SetVisible(true);
+        // 이전 버전이 등록한 명령(파일 경로가 다름)을 현재 형식으로 갱신한다. 꺼져 있으면 아무것도 안 함
+        if (ClaudeLink.IsEnabled(ClaudeLink.SettingsPath)) ClaudeLink.SetEnabled(ClaudeLink.SettingsPath, true);
         WatchFiles();
         _ = LoopAsync();
     }
@@ -228,8 +230,7 @@ public partial class App : Application
     {
         // ponytail: Codex를 나중에 설치하면 앱을 다시 켠 뒤부터 감시. 그 전엔 정기 조회
         Watch(Path.Combine(S.CodexHome, "sessions"), "*.jsonl", true, () => _cfg.Codex);
-        Directory.CreateDirectory(Config.Dir);
-        Watch(Config.Dir, ClaudeLink.LiveName, false, () => _cfg.Claude);
+        Watch(Path.GetDirectoryName(ClaudeLink.LivePath)!, ClaudeLink.LiveName, false, () => _cfg.Claude);
     }
 
     /// 파일이 바뀌면 곧바로 다시 읽는다: 답변 한 번에 여러 번 쓰므로 마지막 쓰기 1초 뒤 한 번만.

@@ -25,14 +25,15 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트�
 
 **공통**
 - 한 번에 하나만 실행됩니다. 5분마다 갱신하고, 요청 제한(429)을 받으면 최대 10분까지 조회 간격을 늘립니다. 조회에 성공한 뒤 5분 안에는 새로고침을 눌러도 Claude를 다시 조회하지 않습니다(429 예방).
-- 설정: `%APPDATA%\UsageTray\config.json` (`interval` 300~86400초)
-- **Claude Code 즉시 반영**(트레이 메뉴): Claude Code의 `statusLine`에 연결해, Claude Code를 쓰는 동안 응답마다 사용률을 바로 반영합니다(API 조회 없음). 기존 statusLine 명령(claude-hud 등)은 그대로 이어서 실행되고, 끄면 원래 설정으로 되돌립니다. `settings.json`을 바꿀 때마다 `settings.json.usagewidget.bak`으로 백업합니다.
+- 설정·마지막 값: `%LOCALAPPDATA%\Packages\do-gongil.SessionUsageWidget_<ID>\LocalCache\Roaming\UsageTray\` (MSIX가 `%APPDATA%` 쓰기를 이 위치로 돌림. 이전 Python 버전을 써서 `%APPDATA%\UsageTray`가 이미 있는 PC는 그 폴더를 씀). `config.json`의 `interval`은 300~86400초
+- **Claude Code 즉시 반영**(트레이 메뉴): Claude Code의 `statusLine`에 연결해, Claude Code를 쓰는 동안 응답마다 사용률을 바로 반영합니다(API 조회 없음). 값은 `~\.claude\claude-live.json`으로 받습니다. 기존 statusLine 명령(claude-hud 등)은 그대로 이어서 실행되고, 끄면 원래 명령으로 되돌립니다. `settings.json`을 바꿀 때마다 `settings.json.usagewidget.bak`으로 백업합니다.
 
 ## 설치
 
 **[Microsoft Store에서 받기](https://apps.microsoft.com/detail/9NN9GN3KMSWN)** — 설치·업데이트·제거 모두 Store에서 처리됩니다.
 
 - **Claude Code에 로그인되어 있어야 합니다**(`claude` 실행 → 로그인). 웹·데스크톱 앱만 쓰는 경우에도 Claude Code로 한 번 로그인하면 같은 계정의 사용률이 표시됩니다.
+- Store 앱을 제거하면 위 Store 설정 폴더와 "시작 시 실행" 등록도 함께 지워집니다. `~\.claude`, `~\.codex`는 그대로입니다. 즉시 반영을 쓰고 있었다면 제거 전에 트레이 메뉴에서 꺼 두세요(켜 둔 채 지우면 `~\.claude\settings.json`의 statusLine 명령과 `~\.claude\claude-live.json`이 남음). 이전 Python 버전이 만든 `%APPDATA%\UsageTray`도 남으므로 필요하면 직접 지웁니다.
 
 ## 아이콘을 항상 보이게 하기
 
@@ -43,7 +44,7 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트�
 
 | 대상 | 방식 |
 |---|---|
-| Claude | `%USERPROFILE%\.claude\.credentials.json`의 OAuth 토큰으로 `https://api.anthropic.com/api/oauth/usage`를 조회. 즉시 반영을 켜면 Claude Code가 statusLine에 넘기는 `rate_limits`를 `%APPDATA%\UsageTray\claude-live.json`으로 받아 먼저 사용 |
+| Claude | `%USERPROFILE%\.claude\.credentials.json`의 OAuth 토큰으로 `https://api.anthropic.com/api/oauth/usage`를 조회. 즉시 반영을 켜면 Claude Code가 statusLine에 넘기는 `rate_limits`를 `%USERPROFILE%\.claude\claude-live.json`으로 받아 먼저 사용 |
 | Codex | `%CODEX_HOME%` 또는 `%USERPROFILE%\.codex\sessions`의 최신 jsonl에서 `rate_limits`를 읽음 (네트워크 안 씀) |
 
 - **사용자 본인의 PC 로그인 정보**를 사용합니다. 저장소에는 어떤 인증 정보도 들어 있지 않습니다.
@@ -52,7 +53,7 @@ Claude Code / Codex CLI의 **5시간·주간 한도 사용률**을 Windows 트�
 
 ## 한계
 
-- `/api/oauth/usage`는 **공식 문서에 없는 엔드포인트**라 예고 없이 바뀔 수 있습니다.
+- `/api/oauth/usage`는 **공식 문서에 없는 엔드포인트**라 예고 없이 바뀔 수 있습니다. 응답에서 사용률을 하나도 읽지 못하면 "응답 형식 변경"으로 표시하고 직전 값을 회색으로 유지합니다.
 - 토큰이 만료되면 "토큰 만료"로 표시됩니다. Claude Code를 한 번 실행하면 다시 정상으로 돌아옵니다.
 - Codex 값은 **Codex를 마지막으로 사용한 시점** 기준입니다.
 - API 키(Console 과금) 사용자에게는 5시간·주간 한도가 없어 표시할 값이 없습니다.
